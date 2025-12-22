@@ -1,0 +1,286 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "StreetVision Cascade Miner Dashboard - Per REALISTIC_DEPLOYMENT_PLAN.md",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "title": "🚨 Model Age (90-Day Retrain Deadline)",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "streetvision_model_age_days",
+          "legendFormat": "Model Age (days)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 70},
+              {"color": "orange", "value": 80},
+              {"color": "red", "value": 85}
+            ]
+          },
+          "unit": "days"
+        }
+      }
+    },
+    {
+      "title": "Days Until Retrain Deadline",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "targets": [
+        {
+          "expr": "streetvision_retrain_deadline_days",
+          "legendFormat": "Days Remaining"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "orange", "value": 5},
+              {"color": "yellow", "value": 15},
+              {"color": "green", "value": 20}
+            ]
+          },
+          "unit": "days"
+        }
+      }
+    },
+    {
+      "title": "GPU VRAM Usage",
+      "type": "gauge",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "streetvision_gpu_vram_bytes / 1024 / 1024 / 1024",
+          "legendFormat": "VRAM (GB)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "max": 24,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 18},
+              {"color": "red", "value": 22}
+            ]
+          },
+          "unit": "decgbytes"
+        }
+      }
+    },
+    {
+      "title": "GPU Temperature",
+      "type": "gauge",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "targets": [
+        {
+          "expr": "streetvision_gpu_temperature_celsius",
+          "legendFormat": "Temperature"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 70},
+              {"color": "orange", "value": 80},
+              {"color": "red", "value": 85}
+            ]
+          },
+          "unit": "celsius"
+        }
+      }
+    },
+    {
+      "title": "Cascade Stage Latency (p50, p95, p99)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(streetvision_stage_latency_seconds_bucket[5m]))",
+          "legendFormat": "Stage {{stage}} p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(streetvision_stage_latency_seconds_bucket[5m]))",
+          "legendFormat": "Stage {{stage}} p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(streetvision_stage_latency_seconds_bucket[5m]))",
+          "legendFormat": "Stage {{stage}} p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "title": "Total Cascade Latency",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(streetvision_total_latency_seconds_bucket[5m]))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(streetvision_total_latency_seconds_bucket[5m]))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(streetvision_total_latency_seconds_bucket[5m]))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.1},
+              {"color": "red", "value": 0.3}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Query Throughput (QPS)",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 12},
+      "targets": [
+        {
+          "expr": "streetvision_query_throughput_per_second",
+          "legendFormat": "Queries/sec"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      }
+    },
+    {
+      "title": "Cache Hit Rate",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 12},
+      "targets": [
+        {
+          "expr": "streetvision_cache_hit_rate * 100",
+          "legendFormat": "Cache Hit Rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 5},
+              {"color": "green", "value": 10}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Overall Accuracy",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 12},
+      "targets": [
+        {
+          "expr": "streetvision_overall_accuracy * 100",
+          "legendFormat": "Accuracy"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 96},
+              {"color": "green", "value": 98}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Cascade Exit Distribution",
+      "type": "piechart",
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 16},
+      "targets": [
+        {
+          "expr": "sum(rate(streetvision_cascade_exit_total[5m])) by (stage)",
+          "legendFormat": "Stage {{stage}}"
+        }
+      ]
+    },
+    {
+      "title": "Query Results (Positive vs Negative)",
+      "type": "piechart",
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 16},
+      "targets": [
+        {
+          "expr": "sum(rate(streetvision_queries_total[5m])) by (result)",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "title": "Errors by Type",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 16},
+      "targets": [
+        {
+          "expr": "rate(streetvision_errors_total[5m])",
+          "legendFormat": "{{error_type}}"
+        }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["streetvision", "bittensor", "subnet72"],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "StreetVision Cascade Miner",
+  "version": 1
+}
+
