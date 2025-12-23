@@ -62,13 +62,14 @@ def validate_thresholds():
     all_probs = np.concatenate(all_probs)
     all_labels = np.concatenate(all_labels)
 
-    # Test different thresholds
+    # Test different thresholds (0.70 to 0.99 with step 0.01)
     print("\n" + "="*80)
     print("THRESHOLD VALIDATION - Target: ~60% exit rate, ≥99% accuracy on exits")
     print("="*80)
 
-    thresholds = [0.80, 0.82, 0.85, 0.88, 0.90, 0.92, 0.95]
+    thresholds = [round(x / 100, 2) for x in range(70, 100)]  # 0.70 ... 0.99
 
+    results = []
     for thresh in thresholds:
         # High confidence mask (exit at Stage 1)
         # Exit if p(roadwork) >= thresh OR p(roadwork) <= (1-thresh)
@@ -96,14 +97,65 @@ def validate_thresholds():
 
         # Check if meets target from REALISTIC_DEPLOYMENT_PLAN
         # Target: ~60% exit rate, ≥99.2% accuracy
-        if 55 <= coverage*100 <= 65 and accuracy*100 >= 99:
+        meets_target = (55 <= coverage*100 <= 65 and accuracy*100 >= 99)
+        if meets_target:
             print(f"  ✅ MEETS TARGET! Recommended threshold: {thresh:.2f}")
         elif accuracy*100 >= 99:
             print(f"  ⚠️ High accuracy but exit rate is {coverage*100:.1f}% (target: 60%)")
         elif 55 <= coverage*100 <= 65:
             print(f"  ⚠️ Good exit rate but accuracy is {accuracy*100:.2f}% (target: ≥99%)")
 
+        # Store results
+        results.append({
+            'threshold': thresh,
+            'exit_rate': coverage*100,
+            'accuracy': accuracy*100,
+            'f1': f1*100,
+            'mcc': mcc,
+            'meets_target': meets_target
+        })
+
     print("\n" + "="*80)
+
+    # Find best threshold
+    best_threshold = None
+    for r in results:
+        if r['meets_target']:
+            best_threshold = r
+            break
+    
+    if not best_threshold:
+        # If no perfect match, pick closest to target
+        best_threshold = min(results, key=lambda x: abs(x['exit_rate'] - 60) + (0 if x['accuracy'] >= 99 else 1000))
+
+    print(f"\n🎯 Recommended Production Threshold: {best_threshold['threshold']:.2f}")
+    print(f"   Exit Rate: {best_threshold['exit_rate']:.1f}%")
+    print(f"   Exit Accuracy: {best_threshold['accuracy']:.2f}%")
+    print(f"   F1 Score: {best_threshold['f1']:.2f}%")
+    print(f"   MCC: {best_threshold['mcc']:.4f}")
+
+    # Save results to file
+    output_file = "threshold_validation.txt"
+    with open(output_file, 'w') as f:
+        f.write("="*80 + "\n")
+        f.write("THRESHOLD VALIDATION RESULTS\n")
+        f.write("Target: ~60% exit rate, ≥99% accuracy on exits\n")
+        f.write("="*80 + "\n\n")
+        f.write(f"{'Threshold':<12} {'Exit Rate %':<15} {'Accuracy %':<15} {'F1 %':<12} {'MCC':<10} {'Status':<10}\n")
+        f.write("-"*80 + "\n")
+        for r in results:
+            status = "✅ TARGET" if r['meets_target'] else ""
+            f.write(f"{r['threshold']:<12.2f} {r['exit_rate']:<15.1f} {r['accuracy']:<15.2f} "
+                   f"{r['f1']:<12.2f} {r['mcc']:<10.4f} {status:<10}\n")
+        f.write("\n" + "="*80 + "\n")
+        f.write(f"\n🎯 Recommended Production Threshold: {best_threshold['threshold']:.2f}\n")
+        f.write(f"   Exit Rate: {best_threshold['exit_rate']:.1f}%\n")
+        f.write(f"   Exit Accuracy: {best_threshold['accuracy']:.2f}%\n")
+        f.write(f"   F1 Score: {best_threshold['f1']:.2f}%\n")
+        f.write(f"   MCC: {best_threshold['mcc']:.4f}\n")
+        f.write(f"\nTarget: ~60% exit, ≥99% exit accuracy\n")
+    
+    print(f"\n📊 Results saved to: {output_file}")
 
 if __name__ == "__main__":
     validate_thresholds()
