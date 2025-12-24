@@ -62,9 +62,14 @@ def process_roadwork_iccv(raw_dir="data/roadwork_iccv/raw", output_dir="data/roa
     """
     Process downloaded ROADWork dataset into our binary format.
 
-    Converts ROADWork annotations to simple binary labels:
-    - label=1: work zone present (cones, barriers, arrow boards, signs, workers)
-    - label=0: clean road (no work zone)
+    ROADWork uses COCO-like format with categories for:
+    - Cones, barriers, arrow boards, signs, workers, etc.
+
+    Converts to binary labels:
+    - label=1: work zone present (any work zone object detected)
+    - label=0: clean road (no work zone objects)
+
+    NOTE: This parser assumes COCO format. Adjust if actual format differs.
     """
     print("\n" + "="*80)
     print("PROCESSING ROADWORK DATASET")
@@ -72,68 +77,72 @@ def process_roadwork_iccv(raw_dir="data/roadwork_iccv/raw", output_dir="data/roa
 
     if not os.path.exists(raw_dir):
         print(f"❌ Error: {raw_dir} not found!")
-        print(f"   Please download ROADWork dataset first using --download_roadwork")
+        print(f"   Please download ROADWork ZIPs from CMU KiltHub first.")
+        print(f"   Visit: https://github.com/anuragxel/roadwork-dataset")
         return
 
-    # Look for annotation files
-    annotation_files = list(Path(raw_dir).rglob("*.json"))
+    # Look for annotation files (COCO format: instances_train.json, instances_val.json)
+    annotation_files = list(Path(raw_dir).rglob("instances_*.json")) + \
+                       list(Path(raw_dir).rglob("annotations_*.json"))
 
     if not annotation_files:
-        print(f"❌ No annotation files found in {raw_dir}")
-        print(f"   Expected JSON files with work zone annotations")
+        print(f"❌ No COCO annotation files found in {raw_dir}")
+        print(f"   Expected: instances_train.json, instances_val.json")
+        print(f"   Check if you unzipped annotations.zip correctly")
         return
 
     print(f"✅ Found {len(annotation_files)} annotation files")
 
-    # Process annotations
-    train_samples = []
-    val_samples = []
+    # Process each annotation file (train/val)
+    for ann_file in annotation_files:
+        print(f"\nProcessing: {ann_file.name}")
 
-    for ann_file in tqdm(annotation_files, desc="Processing annotations"):
         with open(ann_file, 'r') as f:
-            data = json.load(f)
+            coco_data = json.load(f)
 
-        # ROADWork annotation format (adapt based on actual structure)
-        # This is a placeholder - adjust based on actual ROADWork format
-        for item in data.get('annotations', []):
-            image_path = item.get('image_path', '')
+        # COCO format: images list + annotations list
+        images_info = {img['id']: img for img in coco_data['images']}
 
-            # Determine if work zone present
-            # ROADWork has: cones, barriers, arrow_boards, signs, workers, etc.
-            has_workzone = (
-                item.get('work_zone_present', False) or
-                len(item.get('cones', [])) > 0 or
-                len(item.get('barriers', [])) > 0 or
-                len(item.get('arrow_boards', [])) > 0 or
-                len(item.get('work_zone_signs', [])) > 0 or
-                len(item.get('workers', [])) > 0
-            )
+        # Build image_id -> has_annotation map
+        image_has_workzone = {}
+        for ann in coco_data['annotations']:
+            img_id = ann['image_id']
+            # Any annotation means work zone present
+            image_has_workzone[img_id] = True
 
-            label = 1 if has_workzone else 0
+        # Create samples
+        samples = []
+        for img_id, img_info in images_info.items():
+            # Construct image path relative to raw_dir
+            img_filename = img_info['file_name']
+            img_path = os.path.join(raw_dir, img_filename)
 
-            # Split train/val based on ROADWork's official split
-            split = item.get('split', 'train')
+            # Check if image exists, else try common variations
+            if not os.path.exists(img_path):
+                # Try under scene/images/ subdirectory
+                alt_path = os.path.join(raw_dir, "scene", "images", img_filename)
+                if os.path.exists(alt_path):
+                    img_path = alt_path
 
-            if split == 'train':
-                train_samples.append((image_path, label))
-            else:
-                val_samples.append((image_path, label))
+            label = 1 if img_id in image_has_workzone else 0
+            samples.append((img_path, label))
 
-    # Save to CSV
-    train_df = pd.DataFrame(train_samples, columns=['image_path', 'label'])
-    val_df = pd.DataFrame(val_samples, columns=['image_path', 'label'])
+        # Determine split from filename
+        if 'train' in ann_file.name.lower():
+            split = 'train'
+        elif 'val' in ann_file.name.lower():
+            split = 'val'
+        else:
+            split = 'train'  # Default to train
 
-    train_csv = os.path.join(output_dir, 'train_labels.csv')
-    val_csv = os.path.join(output_dir, 'val_labels.csv')
+        # Save to CSV
+        df = pd.DataFrame(samples, columns=['image_path', 'label'])
+        csv_path = os.path.join(output_dir, f'{split}_labels.csv')
+        df.to_csv(csv_path, index=False, header=False)
 
-    train_df.to_csv(train_csv, index=False, header=False)
-    val_df.to_csv(val_csv, index=False, header=False)
-
-    print(f"\n✅ Processed ROADWork dataset:")
-    print(f"   Train: {len(train_samples)} samples -> {train_csv}")
-    print(f"   Val:   {len(val_samples)} samples -> {val_csv}")
-    print(f"   Work zones (train): {train_df['label'].sum()} ({100*train_df['label'].mean():.1f}%)")
-    print(f"   Work zones (val):   {val_df['label'].sum()} ({100*val_df['label'].mean():.1f}%)")
+        print(f"✅ {split.upper()}: {len(samples)} samples -> {csv_path}")
+        print(f"   Work zones: {df['label'].sum()} ({100*df['label'].mean():.1f}%)")
+        print(f"   Clean roads: {(df['label']==0).sum()} ({100*(1-df['label'].mean()):.1f}%)")
 
 
 def download_roboflow_roadwork(output_dir="data/roadwork_extra"):

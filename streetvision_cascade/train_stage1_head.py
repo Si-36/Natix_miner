@@ -52,7 +52,7 @@ class TrainingConfig:
     # Batch sizes
     max_batch_size: int = 64
     fallback_batch_size: int = 32
-    config.grad_accum_steps: int = 2
+    grad_accum_steps: int = 2
 
     # Training schedule
     epochs: int = 10
@@ -65,14 +65,14 @@ class TrainingConfig:
 
     # Regularization
     label_smoothing: float = 0.1
-    config.max_grad_norm: float = 1.0
+    max_grad_norm: float = 1.0
     dropout: float = 0.3
 
     # Advanced features
     use_amp: bool = True
     use_ema: bool = True
     ema_decay: float = 0.9999
-    config.early_stop_patience: int = 3
+    early_stop_patience: int = 3
 
     # Cascade exit monitoring
     exit_threshold: float = 0.88  # Target threshold for ~60% exit rate
@@ -182,9 +182,9 @@ class MultiRoadworkDataset(Dataset):
     Combines NATIX + ROADWork + extra roadwork datasets into one unified training set.
     All datasets are normalized to binary labels: 0 = no roadwork, 1 = roadwork.
 
-    Why: ROADWork paper shows 32.5% precision improvement and 12.8× higher discovery
-    rate on work zones after fine-tuning on diverse work zone data. Combining NATIX
-    (Europe-centric) + ROADWork (US-centric) + extras gives maximum robustness.
+    Why: Combining diverse work zone datasets may improve robustness and edge-case handling.
+    ROADWork provides US-centric coverage, Open Images adds global diversity, GTSRB adds
+    EU signage patterns. Measure impact on NATIX val set for true deployment performance.
 
     Args:
         dataset_configs: List of (image_dir, labels_file) tuples
@@ -502,14 +502,14 @@ def train_with_cached_features(config: TrainingConfig):
                     loss = criterion(logits, labels)
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(classifier_head.parameters(), config.config.max_grad_norm)
+                torch.nn.utils.clip_grad_norm_(classifier_head.parameters(), config.max_grad_norm)
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 logits = classifier_head(features)
                 loss = criterion(logits, labels)
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(classifier_head.parameters(), config.config.max_grad_norm)
+                torch.nn.utils.clip_grad_norm_(classifier_head.parameters(), config.max_grad_norm)
                 optimizer.step()
 
             optimizer.zero_grad()
@@ -674,16 +674,38 @@ def train_dinov3_head(config: TrainingConfig):
         else:
             print(f"   ⚠️  ROADWork not found at {roadwork_train}")
 
-        # Add extra roadwork datasets if available
+        # Add Roboflow work zone datasets if available
         extra_train = os.path.join(config.roadwork_extra_dir, "train_labels.csv")
         if os.path.exists(extra_train):
             dataset_configs.append((
                 os.path.join(config.roadwork_extra_dir, "train_images"),
                 extra_train
             ))
-            print(f"   ✅ Adding extra roadwork datasets (Roboflow, etc.)")
+            print(f"   ✅ Adding Roboflow work zone datasets")
         else:
-            print(f"   ⚠️  Extra roadwork not found at {extra_train}")
+            print(f"   ⚠️  Roboflow not found at {extra_train}")
+
+        # Add Open Images V7 (positives booster) if available
+        open_images_train = "data/open_images/train_labels.csv"
+        if os.path.exists(open_images_train):
+            dataset_configs.append((
+                "data/open_images/coco/data",
+                open_images_train
+            ))
+            print(f"   ✅ Adding Open Images V7 (positives booster)")
+        else:
+            print(f"   ⚠️  Open Images not found at {open_images_train}")
+
+        # Add GTSRB Class 25 (EU signs) if available
+        gtsrb_train = "data/gtsrb_class25/train_labels.csv"
+        if os.path.exists(gtsrb_train):
+            dataset_configs.append((
+                "data/gtsrb_class25/train_images",
+                gtsrb_train
+            ))
+            print(f"   ✅ Adding GTSRB Class 25 (EU roadwork signs)")
+        else:
+            print(f"   ⚠️  GTSRB not found at {gtsrb_train}")
 
         train_dataset = MultiRoadworkDataset(
             dataset_configs=dataset_configs,
@@ -772,8 +794,8 @@ def train_dinov3_head(config: TrainingConfig):
     if config.use_ema:
         print(f"✅ EMA enabled (decay={config.ema_decay})")
 
-    print(f"✅ Gradient clipping: max_norm={config.config.max_grad_norm}")
-    print(f"✅ Early stopping: patience={config.config.early_stop_patience} epochs")
+    print(f"✅ Gradient clipping: max_norm={config.max_grad_norm}")
+    print(f"✅ Early stopping: patience={config.early_stop_patience} epochs")
 
     # Create DataLoaders with drop_last=True for torch.compile stability (2025 SOTA)
     train_loader = DataLoader(
@@ -933,7 +955,7 @@ def train_dinov3_head(config: TrainingConfig):
             for images, labels in pbar:
                 images, labels = images.to(device), labels.to(device)
 
-                if use_amp:
+                if config.use_amp:
                     with autocast():
                         outputs = backbone(pixel_values=images)
                         features = outputs.last_hidden_state[:, 0, :]
