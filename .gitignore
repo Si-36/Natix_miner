@@ -1,106 +1,41 @@
-# ============================================
-# CRITICAL: Prevent committing large files
-# ============================================
+# Data directories (34 GB - too large for git)
+data/
+streetvision_cascade/data/
+*.tar.gz
+*.zip
+gtsrb-german-traffic-sign.zip
 
-# Virtual Environments (11GB+)
-/phase0_testnet/venv/
-/streetvision_cascade/.venv/
-venv/
+# Model weights (download on SSH server)
+models/
+streetvision_cascade/models/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
 .venv/
+venv/
+ENV/
 env/
-.virtualenv/
+streetvision_cascade/.venv/
 
-# Models & Checkpoints (60GB+)
-/streetvision_cascade/models/
-/phase0_testnet/models/
+# Training outputs
+*.log
 *.pt
 *.pth
 *.ckpt
+cached_features/
+wandb/
 *.safetensors
-*.bin
-*.onnx
-*.engine
-yolo11x.pt
 
-# Training Data (328MB+)
-/streetvision_cascade/data/
-/phase0_testnet/data/
-/streetvision_cascade/cache/
-
-# Python artifacts
-__pycache__/
-*.py[cod]
-*.so
-*.egg
-*.egg-info/
-dist/
-build/
-.eggs/
-
-# Testing & Coverage
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.nox/
-
-# IDE & Editor files
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*.swn
-*~
+
+# OS
 .DS_Store
-.AppleDouble
-.LSOverride
-
-# Logs & Runtime
-*.log
-logs/
-.wandb/
-tensorboard_logs/
-/phase0_testnet/logs/
-/streetvision_cascade/logs/
-
-# Environment & Secrets
-.env
-.env.local
-.env.*.local
-*.local.json
-secrets.json
-
-# Claude IDE metadata
-.claude/
-
-# Checkpoints & Experiments
-checkpoints/
-experiments/
-runs/
-outputs/
-
-# Database files
-*.db
-*.sqlite
-*.sqlite3
-
-# Temporary files
-tmp/
-temp/
-*.tmp
-*.bak
-*.backup
-
-# Legacy documentation (45 files to archive)
-fd*.md
-ff*.md
-most*.md
-LastPlan.md
-uptemade_plan_last.md
-cursor_*.md
-lala.md
-complite_miss.md
-testnet.md
-start_testnet
-all.md
-CONSOLIDATION_SUMMARY.md
+Thumbs.db

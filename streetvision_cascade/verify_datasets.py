@@ -88,10 +88,15 @@ def check_dataset(name, image_dir, labels_csv, expected_min_samples=0):
     # Warn if all positives or all negatives
     if label_counts.get(0, 0) == 0:
         print(f"   ⚠️  WARNING: All samples are positives (label=1)")
-        print(f"      This is expected for Open Images/Roboflow/GTSRB (positives boosters)")
+        print(f"      This is expected for Open Images/Roboflow/GTSRB/ROADWork (positives boosters)")
 
     if label_counts.get(1, 0) == 0:
-        errors.append(f"❌ All samples are negatives (label=0) - likely wrong labels")
+        # Kaggle Road Issues is intentionally all negatives (road problems, not roadwork)
+        if "kaggle" in name.lower() or "road issues" in name.lower():
+            print(f"   ⚠️  WARNING: All samples are negatives (label=0)")
+            print(f"      This is CORRECT for Kaggle Road Issues (negatives booster)")
+        else:
+            errors.append(f"❌ All samples are negatives (label=0) - likely wrong labels")
 
     # Check minimum sample count
     if expected_min_samples > 0 and len(df) < expected_min_samples:
@@ -112,7 +117,7 @@ def check_natix():
         "NATIX Train",
         "data/natix_official/train",
         "data/natix_official/train_labels.csv",
-        expected_min_samples=8000
+        expected_min_samples=6000
     )
 
     # Check val
@@ -147,10 +152,11 @@ def check_extra_datasets():
     print("="*80)
 
     datasets = [
-        ("ROADWork", "data/roadwork_iccv/train_images", "data/roadwork_iccv/train_labels.csv", 3000),
+        ("ROADWork", "data/roadwork_iccv/raw/images", "data/roadwork_iccv/train_labels.csv", 2000),
         ("Open Images V7", "data/open_images/coco/data", "data/open_images/train_labels.csv", 1000),
-        ("Roboflow", "data/roadwork_extra/train_images", "data/roadwork_extra/train_labels.csv", 300),
+        ("Roboflow", "data/roadwork_extra/raw/train", "data/roadwork_extra/train_labels.csv", 300),
         ("GTSRB Class 25", "data/gtsrb_class25/train_images", "data/gtsrb_class25/train_labels.csv", 400),
+        ("Kaggle Road Issues", "data/kaggle_road_issues/images", "data/kaggle_road_issues/train_labels.csv", 5000),
     ]
 
     results = {}

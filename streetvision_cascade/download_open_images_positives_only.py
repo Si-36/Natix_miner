@@ -8,12 +8,18 @@ balanced binary dataset.
 
 This script correctly treats all downloaded images as label=1 (roadwork).
 Your negatives should come from NATIX and normal driving data.
+
+NOTE: This script requires MongoDB. If MongoDB is not available, the images
+will still be downloaded, but the script will fail at the dataset creation step.
+In that case, use download_open_images_positives_only_no_mongo.py to process
+the already-downloaded images.
 """
 import fiftyone as fo
 import fiftyone.zoo as foz
 import os
 import json
 import pandas as pd
+import sys
 
 # Target classes for roadwork-related objects
 # Use EXACT class names from Open Images V7 documentation
@@ -32,14 +38,30 @@ print(f"⚠️  IMPORTANT: These will be POSITIVES ONLY (label=1)")
 print(f"   Negatives come from NATIX, not this dataset.\n")
 
 # Download train split with targeted classes
-dataset = foz.load_zoo_dataset(
-    "open-images-v7",
-    split="train",
-    label_types=["detections"],
-    classes=target_classes,
-    max_samples=2000,  # Limit to avoid huge download
-    dataset_name="open_images_roadwork_positives",
-)
+try:
+    dataset = foz.load_zoo_dataset(
+        "open-images-v7",
+        split="train",
+        label_types=["detections"],
+        classes=target_classes,
+        max_samples=2000,  # Limit to avoid huge download
+        dataset_name="open_images_roadwork_positives",
+    )
+except Exception as e:
+    if "mongod" in str(e).lower() or "mongodb" in str(e).lower():
+        print("\n" + "="*80)
+        print("⚠️  MONGODB ERROR DETECTED")
+        print("="*80)
+        print("Images were downloaded successfully, but MongoDB is required")
+        print("to create the dataset object.")
+        print("\n✅ SOLUTION: Use the no-MongoDB version:")
+        print("   python3 download_open_images_positives_only_no_mongo.py")
+        print("\nThis will process the already-downloaded images from:")
+        print("   /home/sina/fiftyone/open-images-v7/train/data/")
+        print("="*80)
+        sys.exit(1)
+    else:
+        raise
 
 print(f"\n✅ Downloaded {len(dataset)} images")
 print(f"   (These are images that contain at least one target class)")
