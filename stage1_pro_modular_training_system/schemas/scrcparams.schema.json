@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SCRC Parameters Schema (Phase 6 Policy)",
+  "type": "object",
+  "properties": {
+    "lambda1": {"type": "number"},
+    "lambda2": {"type": "number"},
+    "scrc_variant": {"type": "string", "enum": ["SCRC-I", "SCRC-T"]},
+    "fnr_bound": {"type": "number"},
+    "coverage": {"type": "number"},
+    "version": {"type": "string"},
+    "model_version": {"type": "string"},
+    "splits_version": {"type": "string"}
+  },
+  "required": ["lambda1", "lambda2", "scrc_variant", "fnr_bound", "coverage", "version"]
+}

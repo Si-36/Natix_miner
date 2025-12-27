@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Gate Parameters Schema (Phase 3 Policy)",
+  "type": "object",
+  "properties": {
+    "gate_threshold": {"type": "number"},
+    "calibrator_type": {"type": "string", "enum": ["platt", "isotonic"]},
+    "calibrator_params": {"type": "object"},
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "coverage": {"type": "number"},
+        "exit_accuracy": {"type": "number"},
+        "fnr_on_exited": {"type": "number"}
+      }
+    }
+  },
+  "required": ["gate_threshold", "calibrator_type", "calibrator_params", "metrics"]
+}

@@ -1,0 +1,48 @@
+# Stage-1 Pro Modular Training System - Requirements (Dec 2025)
+# Latest libraries and best practices
+
+# Core Deep Learning
+torch>=2.1.0
+torchvision>=0.16.0
+torchaudio>=2.1.0
+
+# HuggingFace Ecosystem (Latest Dec 2025)
+transformers>=4.40.0  # Latest DINOv3, Vision Transformers
+peft>=0.10.0  # Parameter-Efficient Fine-Tuning (DoRA, LoRA, etc.)
+accelerate>=0.30.0  # Training acceleration
+datasets>=2.18.0  # Dataset handling
+
+# Vision & Image Processing
+timm>=1.0.0  # PyTorch Image Models (MAE, Vision Transformers)
+pillow>=10.0.0
+opencv-python>=4.8.0
+
+# Scientific Computing
+numpy>=1.24.0
+scipy>=1.11.0
+scikit-learn>=1.3.0  # For calibration (Platt scaling, etc.)
+
+# Evaluation & Metrics
+scikit-image>=0.22.0
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# Data Handling
+pandas>=2.1.0
+pyyaml>=6.0
+
+# Utilities
+tqdm>=4.66.0
+wandb>=0.16.0  # Optional: Weights & Biases for experiment tracking
+tensorboard>=2.15.0  # Optional: TensorBoard logging
+
+# Reproducibility
+python-dotenv>=1.0.0
+
+# JSON Schema Validation
+jsonschema>=4.20.0
+
+# Optional: Advanced Optimizers
+# lion-pytorch>=0.1.0  # Lion optimizer (if using)
+# sam-pytorch>=0.1.0  # SAM optimizer (if using)
+

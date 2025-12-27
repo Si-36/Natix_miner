@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SCRC Parameters Schema (Phase 2)",
+  "description": "SCRC-I calibrator parameters for conformal inference",
+  "type": "object",
+  "required": ["alpha", "n_bins"],
+  "properties": {
+    "alpha": {
+      "type": "number",
+      "description": "Target risk level (FNR constraint)",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "n_bins": {
+      "type": "integer",
+      "description": "Number of bins for quantile estimation",
+      "minimum": 1
+    },
+    "quantiles": {
+      "type": "array",
+      "items": {"type": "number"},
+      "description": "Quantile values for calibration"
+    },
+    "num_classes": {
+      "type": "integer",
+      "description": "Number of output classes"
+    },
+    "fitted": {
+      "type": "boolean",
+      "description": "Whether calibrator has been fitted"
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Bundle Manifest Schema",
+  "description": "Manifest declaring active exit policy and file pointers for deployment bundle",
+  "type": "object",
+  "required": ["active_exit_policy", "version"],
+  "properties": {
+    "active_exit_policy": {
+      "type": "string",
+      "enum": ["softmax", "gate", "scrc"],
+      "description": "Which exit policy is active. Phase 1: softmax, Phase 3+: gate, Phase 6: scrc"
+    },
+    "policy_file": {
+      "type": "string",
+      "description": "Path to active policy file (thresholds.json OR gateparams.json OR scrcparams.json)"
+    },
+    "model_file": {
+      "type": "string",
+      "description": "Path to model_best.pth"
+    },
+    "splits_file": {
+      "type": "string",
+      "description": "Path to splits.json"
+    },
+    "config_file": {
+      "type": "string",
+      "description": "Path to config.json"
+    },
+    "metrics_file": {
+      "type": "string",
+      "description": "Path to metrics.csv"
+    },
+    "version": {
+      "type": "string",
+      "description": "Version of the bundle format"
+    },
+    "created_at": {
+      "type": "string",
+      "description": "Timestamp of bundle creation"
+    },
+    "description": {
+      "type": "string",
+      "description": "Description of the training run"
+    }
+  }
+}

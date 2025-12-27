@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Splits Schema",
+  "type": "object",
+  "properties": {
+    "splits": {
+      "type": "object",
+      "properties": {
+        "val_select": {"type": "array", "items": {"type": "integer"}},
+        "val_calib": {"type": "array", "items": {"type": "integer"}},
+        "val_test": {"type": "array", "items": {"type": "integer"}}
+      },
+      "required": ["val_select", "val_calib", "val_test"]
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "seed": {"type": "integer"},
+        "val_select_ratio": {"type": "number"},
+        "val_calib_ratio": {"type": "number"},
+        "val_test_ratio": {"type": "number"},
+        "split_counts": {"type": "object"},
+        "class_distribution": {"type": "object"},
+        "dataset_source_distribution": {"type": "object"},
+        "usage_rules": {"type": "object"}
+      }
+    }
+  },
+  "required": ["splits", "metadata"]
+}
