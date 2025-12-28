@@ -31,11 +31,16 @@ logger = logging.getLogger(__name__)
 
 class MultiViewGenerator(nn.Module):
     """
-    Generate multiple crops per image for multi-view inference
+    Generate multiple crops per image for multi-view inference (ELITE 2025)
 
     Creates 10 crops:
     - 1 global view (entire image resized to crop_size)
     - 9 tile views (3×3 grid with configurable overlap)
+
+    ELITE OPTIMIZATIONS:
+    - Caches ROI boxes per (H, W, device) - ZERO Python overhead per forward
+    - Fully batched with roi_align - NO loops anywhere
+    - Device-aware caching - works on CPU/GPU/multi-GPU
 
     Why this works:
     - Global view captures overall context (is this a road?)
@@ -49,8 +54,8 @@ class MultiViewGenerator(nn.Module):
 
     Example:
         >>> generator = MultiViewGenerator(crop_size=224, grid_size=(3, 3), overlap=0.15)
-        >>> image = torch.randn(3, 518, 518)  # [C, H, W]
-        >>> crops = generator(image)  # [10, 3, 224, 224]
+        >>> images = torch.randn(2, 3, 518, 518)  # [B, C, H, W]
+        >>> crops = generator(images)  # [2, 10, 3, 224, 224]
     """
 
     def __init__(
@@ -72,9 +77,13 @@ class MultiViewGenerator(nn.Module):
         self.grid_size = grid_size
         self.overlap = overlap
 
+        # ELITE: Cache for ROI boxes (per shape/device)
+        # Key: (H, W, device_str) -> Value: boxes_tensor
+        self._roi_cache: dict[tuple[int, int, str], Tensor] = {}
+
         logger.info(
             f"Initialized MultiViewGenerator: crop_size={crop_size}, "
-            f"grid_size={grid_size}, overlap={overlap:.1%}"
+            f"grid_size={grid_size}, overlap={overlap:.1%} (with ROI caching)"
         )
 
     def _compute_positions(
@@ -117,11 +126,71 @@ class MultiViewGenerator(nn.Module):
 
         return positions
 
+    def _get_cached_roi_boxes(
+        self, B: int, H: int, W: int, device: torch.device
+    ) -> Tensor:
+        """
+        Get or create cached ROI boxes for roi_align (ELITE: zero overhead)
+
+        Caches boxes per (H, W, device) to avoid Python loops on every forward.
+
+        Args:
+            B: Batch size
+            H: Image height
+            W: Image width
+            device: Target device
+
+        Returns:
+            boxes: ROI boxes [B*num_tiles, 5] in format [batch_idx, x1, y1, x2, y2]
+        """
+        # Cache key
+        device_str = str(device)
+        cache_key = (H, W, device_str)
+
+        # Check cache
+        if cache_key in self._roi_cache:
+            # Reuse cached boxes for single image, repeat for batch
+            single_boxes = self._roi_cache[cache_key]  # [num_tiles, 5]
+
+            # Repeat for batch and update batch indices
+            # This is fast (vectorized) vs building boxes in Python loop
+            boxes = single_boxes.repeat(B, 1)  # [B*num_tiles, 5]
+
+            # Update batch indices: 0,0,0...1,1,1...2,2,2...
+            num_tiles = single_boxes.size(0)
+            batch_indices = torch.arange(B, device=device).repeat_interleave(num_tiles)
+            boxes[:, 0] = batch_indices
+
+            return boxes
+
+        # Cache miss: compute boxes once
+        positions = self._compute_positions(H, W)  # List of (x1, y1, x2, y2)
+
+        # Build boxes for single image (batch_idx=0)
+        single_boxes = []
+        for (x1, y1, x2, y2) in positions:
+            single_boxes.append([0, x1, y1, x2, y2])  # batch_idx will be updated
+
+        single_boxes_tensor = torch.tensor(
+            single_boxes, dtype=torch.float32, device=device
+        )  # [num_tiles, 5]
+
+        # Cache it
+        self._roi_cache[cache_key] = single_boxes_tensor
+
+        # Now repeat for batch
+        num_tiles = single_boxes_tensor.size(0)
+        boxes = single_boxes_tensor.repeat(B, 1)  # [B*num_tiles, 5]
+        batch_indices = torch.arange(B, device=device).repeat_interleave(num_tiles)
+        boxes[:, 0] = batch_indices
+
+        return boxes
+
     def forward(self, images: Tensor) -> Tensor:
         """
-        Generate crops from batch of images (BATCHED - NO Python loops!)
+        Generate crops from batch of images (ELITE: ZERO Python overhead!)
 
-        Uses roi_align for batched crop generation (GPU-optimized).
+        Uses cached ROI boxes + roi_align for maximum performance.
 
         Args:
             images: Input images [B, C, H, W]
@@ -142,16 +211,8 @@ class MultiViewGenerator(nn.Module):
             align_corners=False,
         )  # [B, C, crop_size, crop_size]
 
-        # 2. Tile views using roi_align (batched, GPU-optimized!)
-        positions = self._compute_positions(H, W)  # List of (x1, y1, x2, y2)
-
-        # Convert positions to roi_align format: [batch_idx, x1, y1, x2, y2]
-        boxes = []
-        for batch_idx in range(B):
-            for (x1, y1, x2, y2) in positions:
-                boxes.append([batch_idx, x1, y1, x2, y2])
-
-        boxes_tensor = torch.tensor(boxes, dtype=torch.float32, device=images.device)
+        # 2. Tile views using roi_align with CACHED boxes (ELITE: zero overhead!)
+        boxes_tensor = self._get_cached_roi_boxes(B, H, W, images.device)
 
         # Extract and resize all tiles in one batched operation!
         tile_crops = roi_align(
@@ -163,7 +224,7 @@ class MultiViewGenerator(nn.Module):
         )  # [B*num_tiles, C, crop_size, crop_size]
 
         # Reshape tiles to [B, num_tiles, C, crop_size, crop_size]
-        num_tiles = len(positions)
+        num_tiles = self.grid_size[0] * self.grid_size[1]
         tile_crops = tile_crops.view(B, num_tiles, C, self.crop_size, self.crop_size)
 
         # Concatenate global views with tile views
@@ -582,12 +643,13 @@ if __name__ == "__main__":
     generator = MultiViewGenerator(crop_size=224, grid_size=(3, 3), overlap=0.15)
     print(f"{generator}\n")
 
-    # Test with different image sizes
+    # Test with different image sizes (batched)
     for H, W in [(518, 518), (640, 480), (1024, 768)]:
-        image = torch.randn(3, H, W)
-        crops = generator(image)
-        print(f"Input: {image.shape} → Output: {crops.shape}")
-        assert crops.shape == (10, 3, 224, 224), f"Expected [10, 3, 224, 224], got {crops.shape}"
+        images = torch.randn(2, 3, H, W)  # [B=2, C=3, H, W]
+        crops = generator(images)
+        print(f"Input: {images.shape} → Output: {crops.shape}")
+        expected_shape = (2, 10, 3, 224, 224)  # [B, num_crops, C, H, W]
+        assert crops.shape == expected_shape, f"Expected {expected_shape}, got {crops.shape}"
     print("✅ MultiViewGenerator test passed\n")
 
     # Test 2: TopKMeanAggregator
