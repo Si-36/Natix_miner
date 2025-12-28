@@ -133,27 +133,29 @@ class ValCalibArtifactSaver(Callback):
             logger.warning("No val_calib logits collected (empty dataloader?)")
             return
 
-        # Concatenate all batches
-        logits_array = torch.cat(self.logits_buffer, dim=0).numpy()
-        labels_array = torch.cat(self.labels_buffer, dim=0).numpy()
+        # Concatenate all batches (keep as torch tensors)
+        logits_tensor = torch.cat(self.logits_buffer, dim=0)
+        labels_tensor = torch.cat(self.labels_buffer, dim=0)
 
         logger.info(
-            f"Collected val_calib: logits {logits_array.shape}, labels {labels_array.shape}"
+            f"Collected val_calib: logits {logits_tensor.shape}, labels {labels_tensor.shape}"
         )
 
         # Ensure parent directories exist
         self.logits_path.parent.mkdir(parents=True, exist_ok=True)
         self.labels_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Save to artifact paths
-        import numpy as np
+        # CRITICAL FIX: Save as .pt (torch format), NOT .npy (numpy format)
+        # ArtifactSchema expects .pt files for compatibility with downstream phases
+        torch.save(logits_tensor, self.logits_path)
+        torch.save(labels_tensor, self.labels_path)
 
-        np.save(self.logits_path, logits_array)
-        np.save(self.labels_path, labels_array)
+        logits_size_mb = self.logits_path.stat().st_size / 1024 / 1024
+        labels_size_kb = self.labels_path.stat().st_size / 1024
 
-        logger.info(f"✅ Saved val_calib artifacts:")
-        logger.info(f"  Logits: {self.logits_path} ({logits_array.nbytes / 1024 / 1024:.2f} MB)")
-        logger.info(f"  Labels: {self.labels_path} ({labels_array.nbytes / 1024:.2f} KB)")
+        logger.info(f"✅ Saved val_calib artifacts (torch .pt format):")
+        logger.info(f"  Logits: {self.logits_path} ({logits_size_mb:.2f} MB)")
+        logger.info(f"  Labels: {self.labels_path} ({labels_size_kb:.2f} KB)")
 
         # Clear buffers for next epoch
         self.logits_buffer = []

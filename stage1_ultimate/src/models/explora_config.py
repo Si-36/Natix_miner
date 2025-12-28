@@ -19,6 +19,18 @@ Latest 2025-2026 practices:
 from dataclasses import dataclass, field
 from typing import Literal
 
+try:
+    from peft import TaskType
+    PEFT_AVAILABLE = True
+except ImportError:
+    PEFT_AVAILABLE = False
+    # Fallback: define enum locally if PEFT not installed
+    from enum import Enum
+    class TaskType(str, Enum):
+        FEATURE_EXTRACTION = "FEATURE_EXTRACTION"
+        SEQ_CLS = "SEQ_CLS"
+        CAUSAL_LM = "CAUSAL_LM"
+
 
 @dataclass
 class ExPLoRAConfig:
@@ -61,8 +73,8 @@ class ExPLoRAConfig:
     # Bias adaptation
     bias: Literal["none", "all", "lora_only"] = "none"
 
-    # Task type
-    task_type: Literal["FEATURE_EXTRACTION", "SEQ_CLS", "CAUSAL_LM"] = "FEATURE_EXTRACTION"
+    # Task type (FIXED: use TaskType enum)
+    task_type: TaskType | str = TaskType.FEATURE_EXTRACTION
 
     # Initialization
     init_lora_weights: Literal["gaussian", "pissa", "loftq"] = "gaussian"
@@ -75,16 +87,24 @@ class ExPLoRAConfig:
         """
         Convert to PEFT LoraConfig dictionary
 
+        FIXED: Properly handles TaskType enum (PEFT expects enum, not string)
+
         Returns:
             dict: Parameters for peft.LoraConfig(**config)
         """
+        # Ensure task_type is TaskType enum for PEFT compatibility
+        task_type_value = self.task_type
+        if isinstance(task_type_value, str) and PEFT_AVAILABLE:
+            # Convert string to enum if PEFT is available
+            task_type_value = TaskType(task_type_value)
+
         return {
             "r": self.rank,
             "lora_alpha": self.alpha,
             "lora_dropout": self.dropout,
             "target_modules": self.target_modules,
             "bias": self.bias,
-            "task_type": self.task_type,
+            "task_type": task_type_value,  # FIXED: Use enum
             "init_lora_weights": self.init_lora_weights,
             "use_rslora": self.use_rslora,
             "use_dora": self.use_dora,

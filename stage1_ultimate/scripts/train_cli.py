@@ -75,27 +75,30 @@ def register_phase_executors(engine: DAGEngine) -> None:
         """
         Phase 1: Baseline Training
 
-        Train DINOv3 classifier and save:
-        - Best checkpoint
-        - Val calib logits/labels
-        - Metrics
+        FIXED (2025-12-29 Production-Ready):
+        - Uses torch.save() for .pt files (NOT np.save())
+        - Copies checkpoint to schema-compliant path (model_best.pth)
+        - Uses real HuggingFace model ID (NOT "vit_huge")
+        - Val_calib saver via callback (clean separation)
+        - Config-driven paths (TODO: wire from Hydra)
         """
-        import numpy as np
+        import shutil
         import lightning as L
         from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
         from data import NATIXDataModule
         from models import DINOv3Classifier
+        from callbacks import ValCalibArtifactSaver
 
         logger.info("=" * 80)
-        logger.info("PHASE 1: Baseline Training")
+        logger.info("PHASE 1: Baseline Training (Production-Ready)")
         logger.info("=" * 80)
 
-        # TODO: Get these from Hydra config (for now hardcoded)
-        DATA_ROOT = "/data/natix"  # Update to your data path
-        DINOV3_MODEL = "facebook/dinov3-vith16-pretrain-lvd1689m"  # Or local path
-        BATCH_SIZE = 32
-        MAX_EPOCHS = 50
-        NUM_WORKERS = 4
+        # TODO: Get from Hydra config (for now hardcoded with TODO markers)
+        DATA_ROOT = "/data/natix"  # TODO: cfg.data.root
+        DINOV3_MODEL = "facebook/dinov3-vith16-pretrain-lvd1689m"  # TODO: cfg.model.backbone_id
+        BATCH_SIZE = 32  # TODO: cfg.training.batch_size
+        MAX_EPOCHS = 50  # TODO: cfg.training.max_epochs
+        NUM_WORKERS = 4  # TODO: cfg.hardware.num_workers
 
         logger.info(f"Data root: {DATA_ROOT}")
         logger.info(f"DINOv3 model: {DINOV3_MODEL}")
@@ -108,12 +111,12 @@ def register_phase_executors(engine: DAGEngine) -> None:
             num_workers=NUM_WORKERS,
         )
 
-        # Create model
+        # Create model (FIXED: use real HF model ID)
         model = DINOv3Classifier(
-            backbone_name="vit_huge",
+            backbone_name=DINOV3_MODEL,  # FIXED: Real HF ID, NOT "vit_huge"
             num_classes=13,
-            pretrained_path=DINOV3_MODEL,
-            freeze_backbone=True,  # Freeze DINOv3, only train head
+            pretrained_path=None,  # FIXED: model_name IS the pretrained path
+            freeze_backbone=True,
             head_type="linear",
             dropout_rate=0.3,
             learning_rate=1e-4,
@@ -121,13 +124,13 @@ def register_phase_executors(engine: DAGEngine) -> None:
             use_ema=True,
         )
 
-        logger.info(f"Model: {model.num_trainable_parameters:,} trainable params")
+        logger.info(f"Model trainable params: {model.net['head'].num_parameters:,}")
 
-        # Callbacks
+        # Callbacks (FIXED: Val calib saver via callback)
         callbacks = [
             ModelCheckpoint(
                 dirpath=str(artifacts.phase1_dir),
-                filename="best_model",
+                filename="best_model",  # Will be renamed after training
                 monitor="val/loss",
                 mode="min",
                 save_top_k=1,
@@ -137,6 +140,11 @@ def register_phase_executors(engine: DAGEngine) -> None:
                 mode="min",
                 patience=10,
                 verbose=True,
+            ),
+            ValCalibArtifactSaver(
+                logits_path=artifacts.val_calib_logits,
+                labels_path=artifacts.val_calib_labels,
+                dataloader_idx=1,  # val_calib is index 1
             ),
         ]
 
@@ -156,29 +164,29 @@ def register_phase_executors(engine: DAGEngine) -> None:
         logger.info("Starting training...")
         trainer.fit(model, datamodule=datamodule)
 
-        # Save val_calib logits/labels
-        if hasattr(model, "latest_val_calib_logits"):
-            logger.info("Saving val_calib logits/labels...")
-            np.save(artifacts.val_calib_logits, model.latest_val_calib_logits)
-            np.save(artifacts.val_calib_labels, model.latest_val_calib_labels)
-            logger.info(f"Saved to {artifacts.val_calib_logits}")
+        # CRITICAL FIX: Copy best checkpoint to schema-compliant path
+        best_ckpt_path = callbacks[0].best_model_path
+        if best_ckpt_path and Path(best_ckpt_path).exists():
+            shutil.copy2(best_ckpt_path, artifacts.phase1_checkpoint)
+            logger.info(f"Copied checkpoint: {best_ckpt_path} → {artifacts.phase1_checkpoint}")
         else:
-            logger.warning("No val_calib logits found! Check validation loop.")
+            logger.error(f"Best checkpoint not found: {best_ckpt_path}")
 
-        # Save config
+        # Save config (FIXED: use real model ID)
         import json
         config = {
-            "backbone": "vit_huge",
+            "backbone_id": DINOV3_MODEL,
             "num_classes": 13,
             "batch_size": BATCH_SIZE,
             "max_epochs": MAX_EPOCHS,
-            "best_checkpoint": str(callbacks[0].best_model_path),
+            "best_checkpoint": str(artifacts.phase1_checkpoint),
         }
         with open(artifacts.config_json, "w") as f:
             json.dump(config, f, indent=2)
 
         logger.info(f"✅ Phase 1 complete!")
-        logger.info(f"Best checkpoint: {callbacks[0].best_model_path}")
+        logger.info(f"Checkpoint: {artifacts.phase1_checkpoint}")
+        logger.info(f"Val calib: {artifacts.val_calib_logits}, {artifacts.val_calib_labels}")
         logger.info("=" * 80)
 
     def phase2_executor(artifacts):
@@ -193,16 +201,16 @@ def register_phase_executors(engine: DAGEngine) -> None:
         """
         Phase 4: ExPLoRA (Extended Pretraining with LoRA)
 
-        Domain adaptation: Fine-tune DINOv3 with LoRA adapters on roadwork images.
-        Expected gain: +8.2% accuracy (69% → 77.2%)
+        FIXED (2025-12-29 Production-Ready):
+        - Uses DINOv3 (NOT DINOv2)
+        - Removed use_val_calib=False (datamodule doesn't have this param)
+        - LoRA save as single .pth file (schema-compliant)
+        - Config-driven paths (TODO: wire from Hydra)
 
-        Saves:
-        - Merged backbone checkpoint (explora_backbone.pth)
-        - LoRA adapter weights (explora_lora.pth)
-        - Metrics JSON (metrics.json)
+        Domain adaptation: Fine-tune DINOv3 with LoRA adapters.
+        Expected gain: +8.2% accuracy (69% → 77.2%)
         """
         import json
-        import numpy as np
         import torch
         import lightning as L
         from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
@@ -212,31 +220,31 @@ def register_phase_executors(engine: DAGEngine) -> None:
         from models.explora_config import ExPLoRAConfig
 
         logger.info("=" * 80)
-        logger.info("PHASE 4: ExPLoRA (Extended Pretraining with LoRA)")
+        logger.info("PHASE 4: ExPLoRA (Extended Pretraining with LoRA) - Production-Ready")
         logger.info("=" * 80)
 
         # Configuration (TODO: Get from Hydra config)
-        DATA_ROOT = "/data/natix"  # Update to your data path
-        DINOV3_MODEL = "facebook/dinov2-giant"  # DINOv2 Giant (ViT-g/14)
-        BATCH_SIZE = 16  # Smaller batch for 4 GPUs (total effective: 64)
-        MAX_EPOCHS = 100  # Extended pretraining
-        NUM_WORKERS = 4
-        NUM_GPUS = 4  # 4 GPUs for distributed training
-        LORA_RANK = 16
-        LORA_ALPHA = 32
+        DATA_ROOT = "/data/natix"  # TODO: cfg.data.root
+        DINOV3_MODEL = "facebook/dinov3-vith16-pretrain-lvd1689m"  # FIXED: DINOv3, NOT DINOv2
+        BATCH_SIZE = 16  # TODO: cfg.training.batch_size (per GPU)
+        MAX_EPOCHS = 100  # TODO: cfg.training.max_epochs
+        NUM_WORKERS = 4  # TODO: cfg.hardware.num_workers
+        NUM_GPUS = 4  # TODO: cfg.hardware.num_gpus
+        LORA_RANK = 16  # TODO: cfg.model.lora.rank
+        LORA_ALPHA = 32  # TODO: cfg.model.lora.alpha
 
         logger.info(f"Data root: {DATA_ROOT}")
         logger.info(f"DINOv3 model: {DINOV3_MODEL}")
         logger.info(f"LoRA rank: {LORA_RANK}, alpha: {LORA_ALPHA}")
         logger.info(f"Training on {NUM_GPUS} GPUs for {MAX_EPOCHS} epochs")
 
-        # Load frozen DINOv3 backbone
+        # Load frozen DINOv3 backbone (FIXED: DINOv3)
         logger.info("Loading DINOv3 backbone...")
         backbone = AutoModel.from_pretrained(
             DINOV3_MODEL,
-            torch_dtype=torch.bfloat16,  # Use bfloat16 for memory efficiency
+            torch_dtype=torch.bfloat16,
         )
-        backbone.requires_grad_(False)  # Freeze completely
+        backbone.requires_grad_(False)
 
         # Create LoRA configuration
         lora_config = ExPLoRAConfig(
@@ -244,7 +252,7 @@ def register_phase_executors(engine: DAGEngine) -> None:
             alpha=LORA_ALPHA,
             dropout=0.05,
             target_modules=["q_proj", "v_proj", "k_proj"],
-            use_rslora=True,  # Rank-Stabilized LoRA
+            use_rslora=True,
         )
 
         # Create ExPLoRA module
@@ -259,7 +267,6 @@ def register_phase_executors(engine: DAGEngine) -> None:
             use_gradient_checkpointing=True,
         )
 
-        # Print trainable parameters
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         logger.info(
@@ -268,14 +275,13 @@ def register_phase_executors(engine: DAGEngine) -> None:
             f"  Trainable: {trainable_params:,} ({100.0 * trainable_params / total_params:.2f}%)"
         )
 
-        # Create datamodule
+        # Create datamodule (FIXED: removed use_val_calib)
+        # NOTE: ExPLoRA will still get 2 val loaders, but we only use val_select (index 0)
         datamodule = NATIXDataModule(
             data_root=DATA_ROOT,
             splits_json=str(artifacts.splits_json),
             batch_size=BATCH_SIZE,
             num_workers=NUM_WORKERS,
-            # ExPLoRA only uses TRAIN + VAL_SELECT (no val_calib)
-            use_val_calib=False,
         )
 
         # Callbacks
@@ -291,24 +297,24 @@ def register_phase_executors(engine: DAGEngine) -> None:
             EarlyStopping(
                 monitor="val/loss",
                 mode="min",
-                patience=15,  # More patience for long training
+                patience=15,
                 verbose=True,
             ),
             LearningRateMonitor(logging_interval="epoch"),
         ]
 
-        # Trainer (4 GPUs, DDP strategy)
+        # Trainer (4 GPUs, DDP)
         trainer = L.Trainer(
             max_epochs=MAX_EPOCHS,
             accelerator="gpu",
             devices=NUM_GPUS,
-            strategy="ddp",  # Distributed Data Parallel
-            precision="bf16-mixed",  # bfloat16 mixed precision
+            strategy="ddp",
+            precision="bf16-mixed",
             callbacks=callbacks,
             default_root_dir=str(artifacts.phase4_dir),
             log_every_n_steps=10,
             deterministic=True,
-            gradient_clip_val=1.0,  # Gradient clipping for stability
+            gradient_clip_val=1.0,
         )
 
         # Train
@@ -316,9 +322,9 @@ def register_phase_executors(engine: DAGEngine) -> None:
         logger.info(f"Expected time: ~24 hours on 4× A100 GPUs")
         trainer.fit(model, datamodule=datamodule)
 
-        # Merge LoRA adapters and save (only on rank 0)
+        # Merge and save (only rank 0)
         if trainer.global_rank == 0:
-            logger.info("Merging LoRA adapters and saving checkpoints...")
+            logger.info("Merging LoRA adapters...")
 
             # Load best checkpoint
             best_ckpt_path = callbacks[0].best_model_path
@@ -326,23 +332,32 @@ def register_phase_executors(engine: DAGEngine) -> None:
             checkpoint = torch.load(best_ckpt_path, map_location="cpu")
             model.load_state_dict(checkpoint["state_dict"])
 
-            # Merge and save
+            # CRITICAL FIX: Save LoRA as single .pth file (schema-compliant)
+            # Save merged backbone
             model.merge_and_save(
                 output_path=artifacts.explora_checkpoint,
-                save_lora_separately=True,
-                lora_path=artifacts.explora_lora_checkpoint,
+                save_lora_separately=False,  # Don't use PEFT directory format
             )
+
+            # Save LoRA adapters separately as single .pth
+            lora_state_dict = {
+                name: param.cpu()
+                for name, param in model.backbone.named_parameters()
+                if "lora" in name.lower()
+            }
+            torch.save(lora_state_dict, artifacts.explora_lora_checkpoint)
+            logger.info(f"Saved LoRA adapters: {artifacts.explora_lora_checkpoint}")
 
             # Save metrics
             metrics = model.get_metrics_summary()
             metrics["config"] = {
-                "backbone": DINOV3_MODEL,
+                "backbone_id": DINOV3_MODEL,
                 "lora_rank": LORA_RANK,
                 "lora_alpha": LORA_ALPHA,
                 "batch_size": BATCH_SIZE,
                 "max_epochs": MAX_EPOCHS,
                 "num_gpus": NUM_GPUS,
-                "best_checkpoint": str(best_ckpt_path),
+                "best_checkpoint": str(artifacts.explora_checkpoint),
             }
 
             with open(artifacts.explora_metrics_json, "w") as f:
