@@ -28,6 +28,12 @@ from torchmetrics import Accuracy, MetricCollection
 
 from models.backbone import DINOv3Backbone, create_dinov3_backbone
 from models.head import ClassificationHead, create_classification_head
+from models.multi_view import (
+    MultiViewDINOv3,
+    TopKMeanAggregator,
+    AttentionAggregator,
+    create_multiview_model,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +160,11 @@ class DINOv3Classifier(L.LightningModule):
         weight_decay: AdamW weight decay (0.01 recommended)
         use_ema: If True, use EMA (recommended)
         ema_decay: EMA decay rate (0.9999 recommended)
+        use_multiview: If True, use multi-view inference (for validation/test only)
+        multiview_aggregation: Aggregation strategy ("topk_mean" or "attention")
+        multiview_topk: K for top-k aggregation (only used if aggregation="topk_mean")
+        multiview_grid_size: Grid dimensions for tiles (default: (3, 3))
+        multiview_overlap: Overlap ratio between tiles (default: 0.15)
 
     Example:
         >>> model = DINOv3Classifier(
@@ -179,25 +190,37 @@ class DINOv3Classifier(L.LightningModule):
         weight_decay: float = 0.01,
         use_ema: bool = True,
         ema_decay: float = 0.9999,
+        use_multiview: bool = False,
+        multiview_aggregation: str = "topk_mean",
+        multiview_topk: int = 2,
+        multiview_grid_size: tuple[int, int] = (3, 3),
+        multiview_overlap: float = 0.15,
     ):
         super().__init__()
 
         # Save hyperparameters (Lightning feature)
         self.save_hyperparameters()
 
-        # Model architecture
-        self.backbone = create_dinov3_backbone(
+        # Model architecture - CRITICAL: Use ModuleDict for clean EMA scope
+        backbone = create_dinov3_backbone(
             model_name=backbone_name,
             pretrained_path=pretrained_path,
             freeze=freeze_backbone,
         )
 
-        self.head = create_classification_head(
-            hidden_size=self.backbone.hidden_size,
+        head = create_classification_head(
+            hidden_size=backbone.hidden_size,
             num_classes=num_classes,
             head_type=head_type,
             dropout_rate=dropout_rate,
         )
+
+        # CRITICAL FIX: Wrap in ModuleDict so EMA tracks ONLY model params
+        # (not metrics, optimizers, or other LightningModule state)
+        self.net = nn.ModuleDict({
+            "backbone": backbone,
+            "head": head,
+        })
 
         # Loss function
         self.criterion = nn.CrossEntropyLoss()
@@ -221,6 +244,35 @@ class DINOv3Classifier(L.LightningModule):
         self.use_ema = use_ema
         self.ema = None  # Created in configure_model()
 
+        # Multi-view wrapper (if enabled)
+        self.use_multiview = use_multiview
+        self.multiview = None  # Created here if use_multiview=True
+
+        if use_multiview:
+            # Create aggregator based on strategy
+            if multiview_aggregation == "topk_mean":
+                aggregator = TopKMeanAggregator(topk=multiview_topk)
+            elif multiview_aggregation == "attention":
+                aggregator = AttentionAggregator(num_classes=num_classes)
+            else:
+                raise ValueError(
+                    f"Unknown aggregation strategy: {multiview_aggregation}. "
+                    f"Valid options: 'topk_mean', 'attention'"
+                )
+
+            # Create multi-view wrapper
+            self.multiview = MultiViewDINOv3(
+                backbone=self.net["backbone"],
+                head=self.net["head"],
+                aggregator=aggregator,
+                grid_size=multiview_grid_size,
+                overlap=multiview_overlap,
+            )
+            logger.info(
+                f"Multi-view enabled: {multiview_aggregation} aggregation, "
+                f"grid_size={multiview_grid_size}, overlap={multiview_overlap:.1%}"
+            )
+
         logger.info(
             f"Initialized DINOv3Classifier: {backbone_name} + {head_type} head "
             f"({num_classes} classes)"
@@ -233,30 +285,41 @@ class DINOv3Classifier(L.LightningModule):
         This is where we initialize EMA (needs model on correct device).
         """
         if self.use_ema and self.ema is None:
-            self.ema = EMA(self, decay=self.hparams.ema_decay)
-            logger.info("EMA initialized")
+            # CRITICAL FIX: EMA tracks self.net (ModuleDict), not entire LightningModule
+            self.ema = EMA(self.net, decay=self.hparams.ema_decay)
+            logger.info("EMA initialized (tracking only model params)")
 
-    def forward(self, images: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, images: torch.Tensor, use_multiview: bool = False
+    ) -> torch.Tensor:
         """
         Forward pass
 
+        CRITICAL: Multi-view is ONLY used during validation/test, NOT training!
+        Training always uses single-view (multi-view is too slow).
+
         Args:
-            images: Input images [B, 3, 224, 224]
+            images: Input images [B, 3, H, W]
+            use_multiview: If True and multiview is enabled, use multi-view inference
 
         Returns:
             logits: Class logits [B, num_classes]
         """
-        # Extract features
-        features = self.backbone(images)  # [B, hidden_size]
+        # Multi-view forward (if requested and available)
+        if use_multiview and self.multiview is not None:
+            return self.multiview(images)  # [B, num_classes]
 
-        # Classify
-        logits = self.head(features)  # [B, num_classes]
+        # Single-view forward (default)
+        features = self.net["backbone"](images)  # [B, hidden_size]
+        logits = self.net["head"](features)  # [B, num_classes]
 
         return logits
 
     def training_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
         """
         Training step
+
+        CRITICAL: Always uses single-view (multi-view too slow for training)
 
         Args:
             batch: Tuple of (images, labels)
@@ -267,8 +330,8 @@ class DINOv3Classifier(L.LightningModule):
         """
         images, labels = batch
 
-        # Forward pass
-        logits = self.forward(images)
+        # Forward pass (ALWAYS single-view during training)
+        logits = self.forward(images, use_multiview=False)
 
         # Compute loss
         loss = self.criterion(logits, labels)
@@ -288,7 +351,8 @@ class DINOv3Classifier(L.LightningModule):
         This is where we update EMA.
         """
         if self.use_ema and self.ema is not None:
-            self.ema.update(self)
+            # CRITICAL FIX: Update EMA with self.net (not self)
+            self.ema.update(self.net)
 
     def on_train_epoch_end(self) -> None:
         """
@@ -303,36 +367,59 @@ class DINOv3Classifier(L.LightningModule):
         # Reset metrics
         self.train_metrics.reset()
 
-    def validation_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def validation_step(
+        self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int, dataloader_idx: int = 0
+    ) -> torch.Tensor:
         """
-        Validation step
+        Validation step (handles BOTH val_select and val_calib)
 
-        Uses EMA weights if enabled.
+        CRITICAL:
+        - dataloader_idx=0: val_select (for early stopping)
+        - dataloader_idx=1: val_calib (for calibration - save logits!)
+        - Uses multi-view if enabled (only for validation, not training!)
+        - Uses EMA weights if enabled
 
         Args:
             batch: Tuple of (images, labels)
             batch_idx: Batch index
+            dataloader_idx: Which dataloader (0=val_select, 1=val_calib)
 
         Returns:
             loss: Validation loss
         """
         images, labels = batch
 
-        # Forward pass (with EMA if enabled)
+        # Use multi-view if available (for better validation accuracy)
+        use_mv = self.multiview is not None
+
+        # Forward pass (with EMA if enabled, with multi-view if enabled)
         if self.use_ema and self.ema is not None:
             with self.ema.average_parameters():
-                logits = self.forward(images)
+                logits = self.forward(images, use_multiview=use_mv)
         else:
-            logits = self.forward(images)
+            logits = self.forward(images, use_multiview=use_mv)
 
         # Compute loss
         loss = self.criterion(logits, labels)
 
-        # Compute metrics
-        self.val_metrics.update(logits, labels)
+        # CRITICAL: Handle different dataloaders
+        if dataloader_idx == 0:
+            # val_select: For model selection (early stopping)
+            self.val_metrics.update(logits, labels)
+            self.log("val_select/loss", loss, on_step=False, on_epoch=True, prog_bar=True, add_dataloader_idx=False)
+            # Also log without prefix for compatibility with early stopping
+            self.log("val/loss", loss, on_step=False, on_epoch=True, prog_bar=False, add_dataloader_idx=False)
+        else:
+            # val_calib: For calibration (save logits!)
+            self.log("val_calib/loss", loss, on_step=False, on_epoch=True, prog_bar=False, add_dataloader_idx=False)
 
-        # Log loss
-        self.log("val/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+            # Store logits and labels for calibration (will save at epoch end)
+            if not hasattr(self, "val_calib_logits"):
+                self.val_calib_logits = []
+                self.val_calib_labels = []
+
+            self.val_calib_logits.append(logits.detach().cpu())
+            self.val_calib_labels.append(labels.detach().cpu())
 
         return loss
 
@@ -340,14 +427,34 @@ class DINOv3Classifier(L.LightningModule):
         """
         Called at the end of validation epoch
 
-        Log aggregated metrics.
+        Log aggregated metrics and save val_calib logits/labels.
         """
-        # Compute and log metrics
+        # Compute and log metrics (for val_select)
         metrics = self.val_metrics.compute()
         self.log_dict(metrics, on_epoch=True, prog_bar=True)
 
         # Reset metrics
         self.val_metrics.reset()
+
+        # CRITICAL FIX: Save val_calib logits/labels for calibration
+        if hasattr(self, "val_calib_logits") and len(self.val_calib_logits) > 0:
+            import numpy as np
+
+            # Concatenate all batches
+            logits_array = torch.cat(self.val_calib_logits, dim=0).numpy()
+            labels_array = torch.cat(self.val_calib_labels, dim=0).numpy()
+
+            logger.info(
+                f"Collected val_calib: logits {logits_array.shape}, labels {labels_array.shape}"
+            )
+
+            # Store in module for access (will be saved by Phase 1 executor)
+            self.latest_val_calib_logits = logits_array
+            self.latest_val_calib_labels = labels_array
+
+            # Clear buffers
+            self.val_calib_logits = []
+            self.val_calib_labels = []
 
     def configure_optimizers(self) -> dict[str, Any]:
         """
@@ -394,6 +501,8 @@ class DINOv3Classifier(L.LightningModule):
         """
         Prediction step (for inference)
 
+        Uses multi-view if enabled (recommended for best accuracy).
+
         Args:
             batch: Tuple of (images, labels)
             batch_idx: Batch index
@@ -403,12 +512,15 @@ class DINOv3Classifier(L.LightningModule):
         """
         images, labels = batch
 
-        # Forward pass (with EMA if enabled)
+        # Use multi-view if available (for best inference accuracy)
+        use_mv = self.multiview is not None
+
+        # Forward pass (with EMA if enabled, with multi-view if enabled)
         if self.use_ema and self.ema is not None:
             with self.ema.average_parameters():
-                logits = self.forward(images)
+                logits = self.forward(images, use_multiview=use_mv)
         else:
-            logits = self.forward(images)
+            logits = self.forward(images, use_multiview=use_mv)
 
         # Get probabilities and predictions
         probs = F.softmax(logits, dim=-1)

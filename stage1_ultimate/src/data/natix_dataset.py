@@ -27,6 +27,7 @@ from PIL import Image
 import torchvision.transforms as T
 
 from contracts.split_contracts import Split, SplitValidator
+from data.label_schema import LabelSchema
 
 logger = logging.getLogger(__name__)
 
@@ -247,70 +248,66 @@ class NATIXDataset(Dataset):
 
     def _infer_label(self, image_filename: str) -> int:
         """
-        Infer label from image filename
+        Infer label from image filename using LabelSchema
+
+        CRITICAL: Uses single source of truth (label_schema.py).
+        Fails fast if class is unknown.
 
         Expected formats:
         1. "class_name/image_001.jpg" → parse class_name
         2. "image_001_class5.jpg" → parse class5
-        3. Default to 0 if can't parse
+        3. Numeric directory: "5/image_001.jpg" → class 5
 
         Args:
             image_filename: Filename (possibly with path)
 
         Returns:
             Integer label (0-12 for 13 classes)
+
+        Raises:
+            ValueError: If label cannot be inferred
         """
         # Try to parse from directory structure
         parts = Path(image_filename).parts
         if len(parts) > 1:
             # Has directory, try to parse class name
             class_name = parts[-2]
-            # Map class names to integers (you'll need to define this mapping)
-            class_mapping = self._get_class_mapping()
-            if class_name in class_mapping:
-                return class_mapping[class_name]
 
-        # Try to parse from filename
+            # Try as class name
+            try:
+                return LabelSchema.get_class_id(class_name)
+            except ValueError:
+                pass
+
+            # Try as integer
+            try:
+                label = int(class_name)
+                LabelSchema.validate_label(label)
+                return label
+            except (ValueError, ValueError):
+                pass
+
+        # Try to parse from filename (e.g., "image_001_class5.jpg")
         filename = Path(image_filename).stem
         if "_class" in filename:
             try:
-                class_id = int(filename.split("_class")[-1])
-                return class_id
+                label = int(filename.split("_class")[-1])
+                LabelSchema.validate_label(label)
+                return label
             except (ValueError, IndexError):
                 pass
 
-        # Default to 0 if can't parse
-        logger.warning(
-            f"Could not infer label from filename: {image_filename}, defaulting to 0"
+        # CRITICAL: Fail-fast instead of guessing
+        raise ValueError(
+            f"Could not infer label from filename: {image_filename}\n"
+            f"Expected formats:\n"
+            f"  1. class_name/image.jpg (e.g., 'pothole/img001.jpg')\n"
+            f"  2. class_id/image.jpg (e.g., '4/img001.jpg')\n"
+            f"  3. image_classID.jpg (e.g., 'img001_class4.jpg')\n"
+            f"\nValid class names: {LabelSchema.CLASS_NAMES}\n"
+            f"Valid class IDs: 0-{LabelSchema.NUM_CLASSES-1}\n"
+            f"\nFIX: Use splits.json instead of inferring labels!"
         )
-        return 0
-
-    def _get_class_mapping(self) -> dict[str, int]:
-        """
-        Get class name to integer mapping
-
-        You'll need to customize this based on your dataset structure.
-
-        Returns:
-            Dictionary mapping class names to integers
-        """
-        # Example mapping for NATIX roadwork classes
-        # Customize based on your actual class names
-        return {
-            "no_damage": 0,
-            "longitudinal_crack": 1,
-            "transverse_crack": 2,
-            "alligator_crack": 3,
-            "pothole": 4,
-            "repair": 5,
-            "crosswalk": 6,
-            "manhole": 7,
-            "joint": 8,
-            "marking": 9,
-            "bump": 10,
-            "depression": 11,
-            "other": 12,
-        }
 
     def __len__(self) -> int:
         """Return number of samples"""
@@ -358,8 +355,8 @@ class NATIXDataset(Dataset):
 
     @property
     def num_classes(self) -> int:
-        """Number of classes in dataset"""
-        return 13  # NATIX roadwork has 13 classes
+        """Number of classes in dataset (from LabelSchema)"""
+        return LabelSchema.NUM_CLASSES  # CRITICAL: Use single source of truth
 
     def get_class_distribution(self) -> dict[int, int]:
         """

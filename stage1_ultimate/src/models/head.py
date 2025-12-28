@@ -2,10 +2,12 @@
 Classification Head - Production-Grade Classifier
 
 Simple yet flexible classification head with:
-- Linear projection (1280 → num_classes)
+- Linear projection (hidden_size → num_classes)
 - Optional dropout for regularization
 - Temperature scaling for calibration
 - DoRAN-ready architecture (residual adapters)
+
+CRITICAL: Uses LabelSchema for num_classes (single source of truth).
 
 Latest 2025-2026 practices:
 - Python 3.14+ with modern type hints

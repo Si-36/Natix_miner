@@ -1,0 +1,55 @@
+# DINOv3 Multi-View Configuration
+# Latest 2025-2026 Practices
+#
+# Multi-view inference using spatial tiling:
+#   - 1 global view (entire image)
+#   - 9 tile views (3×3 grid with 15% overlap)
+#   - Batched processing (5-10× faster than sequential)
+#   - Expected: +3-8% accuracy gain, 1.1-1.5× slower inference
+#
+# Use this config for validation/test-time inference.
+# Training still uses single-view (multi-view too slow).
+
+# Model architecture
+backbone_name: vit_huge  # DINOv3 ViT-H/16 (1280 hidden_size)
+num_classes: 13  # NATIX has 13 roadwork classes
+pretrained_path: null  # Set to local path or HuggingFace model ID
+freeze_backbone: true  # Freeze DINOv3, only train classifier head
+
+# Classification head
+head_type: linear  # "linear" or "doran" (DoRAN for TODO 141-160)
+dropout_rate: 0.3  # Dropout for regularization (0.3 recommended, NOT 0.45!)
+
+# Training hyperparameters
+learning_rate: 1.0e-4  # 1e-4 for frozen backbone, 1e-5 for unfrozen
+weight_decay: 0.01  # AdamW weight decay (0.01 recommended, NOT 0.05!)
+
+# EMA (Exponential Moving Average)
+use_ema: true  # Recommended: +0.5-1.5% accuracy
+ema_decay: 0.9999  # Standard EMA decay
+
+# Multi-view inference settings
+use_multiview: true  # Enable multi-view inference
+multiview_aggregation: topk_mean  # "topk_mean" or "attention"
+multiview_topk: 2  # K for top-k aggregation (2 or 3 recommended)
+multiview_grid_size:
+  - 3
+  - 3  # 3×3 grid = 9 tiles
+multiview_overlap: 0.15  # 15% overlap between tiles
+
+# Notes:
+# - Multi-view is ONLY used during validation/test, NOT training
+# - Training always uses single-view (too slow otherwise)
+# - Expected improvement: +3-8% accuracy
+# - Expected slowdown: 1.1-1.5× (batched processing keeps it fast)
+#
+# For single-view inference, set use_multiview: false
+#
+# For attention aggregation (learnable weights):
+#   multiview_aggregation: attention
+#   (needs >10k training samples, adds ~5k parameters)
+#
+# Safe hyperparameters (DO NOT increase):
+#   dropout_rate: 0.3 (NOT 0.45)
+#   weight_decay: 0.01 (NOT 0.05)
+#   multiview_overlap: 0.15 (NOT 0.3)

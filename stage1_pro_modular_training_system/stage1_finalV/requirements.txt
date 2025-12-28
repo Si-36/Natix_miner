@@ -8,6 +8,7 @@
 torch==2.6.0
 lightning==2.4.0
 pytorch-lightning==2.4.0
+transformers==4.56.0  # ✅ Official DINOv3 support (AutoModel, AutoImageProcessor)
 
 # ==============================================================================
 # CONFIGURATION

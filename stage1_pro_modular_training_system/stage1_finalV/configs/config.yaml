@@ -1,0 +1,25 @@
+# ============================================================================
+# Main Hydra Config - Composition via Defaults List (Professional Way)
+# ============================================================================
+# Implements TODO 127: Main config using defaults list composition
+# ============================================================================
+
+defaults:
+  # Base config with paths, reproducibility
+  - base
+  
+  # Phase selection (default to Phase 1)
+  - phase: phase1
+  
+  # Allow CLI overrides
+  - _self_
+
+# ============================================================================
+# CLI Override Target (Hydra best practice)
+# ============================================================================
+
+run:
+  run_id: null              # Auto-generated if null
+  target_phase: 1            # Phase to run (1=Train, 2=Thresholds, 3=Gate, 6=Export)
+  skip_existing: true         # Skip phases if outputs exist (for CI)
+

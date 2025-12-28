@@ -68,12 +68,118 @@ def register_phase_executors(engine: DAGEngine) -> None:
     """
     Register executor functions for all phases
 
-    NOTE: These are placeholder stubs. Real implementation in TODO 1-20.
+    CRITICAL FIX: phase1_executor is now REAL (not stub)!
     """
 
     def phase1_executor(artifacts):
-        logger.warning("Phase 1 executor not implemented yet (TODO 1-20)")
-        raise NotImplementedError("TODO 1-20: Implement Phase 1 training")
+        """
+        Phase 1: Baseline Training
+
+        Train DINOv3 classifier and save:
+        - Best checkpoint
+        - Val calib logits/labels
+        - Metrics
+        """
+        import numpy as np
+        import lightning as L
+        from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
+        from data import NATIXDataModule
+        from models import DINOv3Classifier
+
+        logger.info("=" * 80)
+        logger.info("PHASE 1: Baseline Training")
+        logger.info("=" * 80)
+
+        # TODO: Get these from Hydra config (for now hardcoded)
+        DATA_ROOT = "/data/natix"  # Update to your data path
+        DINOV3_MODEL = "facebook/dinov3-vith16-pretrain-lvd1689m"  # Or local path
+        BATCH_SIZE = 32
+        MAX_EPOCHS = 50
+        NUM_WORKERS = 4
+
+        logger.info(f"Data root: {DATA_ROOT}")
+        logger.info(f"DINOv3 model: {DINOV3_MODEL}")
+
+        # Create datamodule
+        datamodule = NATIXDataModule(
+            data_root=DATA_ROOT,
+            splits_json=str(artifacts.splits_json),
+            batch_size=BATCH_SIZE,
+            num_workers=NUM_WORKERS,
+        )
+
+        # Create model
+        model = DINOv3Classifier(
+            backbone_name="vit_huge",
+            num_classes=13,
+            pretrained_path=DINOV3_MODEL,
+            freeze_backbone=True,  # Freeze DINOv3, only train head
+            head_type="linear",
+            dropout_rate=0.3,
+            learning_rate=1e-4,
+            weight_decay=0.01,
+            use_ema=True,
+        )
+
+        logger.info(f"Model: {model.num_trainable_parameters:,} trainable params")
+
+        # Callbacks
+        callbacks = [
+            ModelCheckpoint(
+                dirpath=str(artifacts.phase1_dir),
+                filename="best_model",
+                monitor="val/loss",
+                mode="min",
+                save_top_k=1,
+            ),
+            EarlyStopping(
+                monitor="val/loss",
+                mode="min",
+                patience=10,
+                verbose=True,
+            ),
+        ]
+
+        # Trainer
+        trainer = L.Trainer(
+            max_epochs=MAX_EPOCHS,
+            accelerator="auto",
+            devices=1,
+            precision="16-mixed",
+            callbacks=callbacks,
+            default_root_dir=str(artifacts.phase1_dir),
+            log_every_n_steps=10,
+            deterministic=True,
+        )
+
+        # Train
+        logger.info("Starting training...")
+        trainer.fit(model, datamodule=datamodule)
+
+        # Save val_calib logits/labels
+        if hasattr(model, "latest_val_calib_logits"):
+            logger.info("Saving val_calib logits/labels...")
+            np.save(artifacts.val_calib_logits, model.latest_val_calib_logits)
+            np.save(artifacts.val_calib_labels, model.latest_val_calib_labels)
+            logger.info(f"Saved to {artifacts.val_calib_logits}")
+        else:
+            logger.warning("No val_calib logits found! Check validation loop.")
+
+        # Save config
+        import json
+        config = {
+            "backbone": "vit_huge",
+            "num_classes": 13,
+            "batch_size": BATCH_SIZE,
+            "max_epochs": MAX_EPOCHS,
+            "best_checkpoint": str(callbacks[0].best_model_path),
+        }
+        with open(artifacts.config_json, "w") as f:
+            json.dump(config, f, indent=2)
+
+        logger.info(f"✅ Phase 1 complete!")
+        logger.info(f"Best checkpoint: {callbacks[0].best_model_path}")
+        logger.info("=" * 80)
 
     def phase2_executor(artifacts):
         logger.warning("Phase 2 executor not implemented yet")

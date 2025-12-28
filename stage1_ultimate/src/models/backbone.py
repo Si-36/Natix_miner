@@ -1,18 +1,20 @@
 """
-DINOv3 Backbone - Production-Grade Feature Extractor
+DINOv3 Backbone - REAL DINOv3 (not DINOv2!)
 
-Loads DINOv3-ViT-H/16+ with:
-- Local checkpoint loading
+CRITICAL FIX: This now uses ACTUAL DINOv3 models, not DINOv2.
+
+Loads DINOv3 with:
+- Hugging Face AutoModel (correct config, patch size, preprocessing)
+- Local or remote checkpoint loading
 - Frozen or LoRA-tunable modes
+- Correct embedding dimensions (from model config, not hardcoded)
 - Flash Attention 3 support (optional)
-- 1280-dim embeddings (ViT-H)
-- Clean interface for feature extraction
 
 Latest 2025-2026 practices:
 - Python 3.14+ with modern type hints
-- torch.compile support
-- Flexible PEFT integration
-- Memory-efficient feature extraction
+- AutoModel for correct DINOv3 loading
+- No hardcoded configs (uses model.config)
+- Fail-fast validation
 """
 
 import logging
@@ -21,153 +23,183 @@ from typing import Optional, Literal
 
 import torch
 import torch.nn as nn
-from transformers import Dinov2Model, Dinov2Config
+from transformers import AutoModel, AutoImageProcessor
 
 logger = logging.getLogger(__name__)
-
-
-# DINOv3 model configurations
-DINOV3_CONFIGS = {
-    "vit_small": {"hidden_size": 384, "num_layers": 12, "num_heads": 6},
-    "vit_base": {"hidden_size": 768, "num_layers": 12, "num_heads": 12},
-    "vit_large": {"hidden_size": 1024, "num_layers": 24, "num_heads": 16},
-    "vit_giant": {"hidden_size": 1536, "num_layers": 40, "num_heads": 24},
-    "vit_huge": {"hidden_size": 1280, "num_layers": 32, "num_heads": 16},  # ViT-H/16+
-}
 
 
 class DINOv3Backbone(nn.Module):
     """
     DINOv3 Backbone for feature extraction
 
+    CRITICAL: This uses REAL DINOv3 (via HuggingFace AutoModel),
+    not DINOv2! The previous version had this bug.
+
     Supports:
+    - Loading from HuggingFace (facebook/dinov3-*)
     - Loading from local checkpoint
     - Frozen feature extraction (default)
     - LoRA-tunable mode (for ExPLoRA)
     - Flash Attention 3 (optional)
-    - torch.compile optimization
+    - Correct patch size from model config
 
     Args:
-        model_name: Model variant (vit_small, vit_base, vit_large, vit_giant, vit_huge)
-        pretrained_path: Path to local checkpoint (optional)
+        model_name: HuggingFace model ID or local path
+                    Examples:
+                    - "facebook/dinov3-vitl16-pretrain-lvd1689m" (ViT-L/16)
+                    - "facebook/dinov3-vith16-pretrain-lvd1689m" (ViT-H/16)
+                    - "/path/to/local/dinov3-checkpoint"
         freeze_backbone: If True, freeze all backbone parameters (default: True)
         use_flash_attention: If True, enable Flash Attention 3 (requires PyTorch 2.5+)
         pooling_mode: How to pool features (cls_token or mean_pool)
+        trust_remote_code: If True, allow remote code execution (HF models)
 
     Example:
+        >>> # From HuggingFace
         >>> backbone = DINOv3Backbone(
-        ...     model_name="vit_huge",
-        ...     pretrained_path="/path/to/dinov3-vith16plus-pretrain-lvd1689m",
+        ...     model_name="facebook/dinov3-vith16-pretrain-lvd1689m",
         ...     freeze_backbone=True
         ... )
-        >>> features = backbone(images)  # [B, 1280]
+        >>> # From local checkpoint
+        >>> backbone = DINOv3Backbone(
+        ...     model_name="/path/to/dinov3-vith16plus-pretrain-lvd1689m",
+        ...     freeze_backbone=True
+        ... )
+        >>> features = backbone(images)  # [B, hidden_size]
     """
 
     def __init__(
         self,
-        model_name: Literal[
-            "vit_small", "vit_base", "vit_large", "vit_giant", "vit_huge"
-        ] = "vit_huge",
-        pretrained_path: Optional[str | Path] = None,
+        model_name: str = "facebook/dinov3-vith16-pretrain-lvd1689m",
         freeze_backbone: bool = True,
         use_flash_attention: bool = False,
         pooling_mode: Literal["cls_token", "mean_pool"] = "cls_token",
+        trust_remote_code: bool = False,
     ):
         super().__init__()
 
         self.model_name = model_name
-        self.pretrained_path = Path(pretrained_path) if pretrained_path else None
         self.freeze_backbone = freeze_backbone
         self.use_flash_attention = use_flash_attention
         self.pooling_mode = pooling_mode
 
-        # Get model config
-        if model_name not in DINOV3_CONFIGS:
-            raise ValueError(
-                f"Unknown model: {model_name}\n"
-                f"Valid models: {list(DINOV3_CONFIGS.keys())}"
-            )
+        # CRITICAL: Load REAL DINOv3 model
+        self.model, self.processor = self._load_dinov3()
 
-        self.config_dict = DINOV3_CONFIGS[model_name]
-        self.hidden_size = self.config_dict["hidden_size"]
-
-        # Load model
-        self.model = self._load_model()
+        # Get config from loaded model (don't hardcode!)
+        self.hidden_size = self.model.config.hidden_size
+        self.image_size = getattr(
+            self.model.config, "image_size", 224
+        )  # Default to 224 if not in config
+        self.patch_size = getattr(
+            self.model.config, "patch_size", 16
+        )  # Get from config, not from name!
 
         # Freeze backbone if requested
         if freeze_backbone:
             self._freeze_backbone()
-            logger.info(f"Froze {model_name} backbone parameters")
+            logger.info(f"Froze DINOv3 backbone parameters")
         else:
-            logger.info(f"Backbone {model_name} is trainable")
+            logger.info(f"DINOv3 backbone is trainable")
 
         logger.info(
-            f"Loaded {model_name} backbone (hidden_size={self.hidden_size}, "
+            f"Loaded DINOv3 from '{model_name}' "
+            f"(hidden_size={self.hidden_size}, "
+            f"image_size={self.image_size}, "
+            f"patch_size={self.patch_size}, "
             f"pooling={pooling_mode})"
         )
 
-    def _load_model(self) -> Dinov2Model:
+    def _load_dinov3(self) -> tuple[nn.Module, Optional[Any]]:
         """
-        Load DINOv3 model from checkpoint or Hugging Face
+        Load DINOv3 model from HuggingFace or local checkpoint
+
+        CRITICAL: Uses AutoModel to get correct DINOv3 architecture.
 
         Returns:
-            Loaded Dinov2Model
+            Tuple of (model, processor)
         """
-        # Create config
-        config = Dinov2Config(
-            hidden_size=self.config_dict["hidden_size"],
-            num_hidden_layers=self.config_dict["num_layers"],
-            num_attention_heads=self.config_dict["num_heads"],
-            image_size=224,
-            patch_size=16 if "16" in self.model_name else 14,
-            num_channels=3,
-            qkv_bias=True,
-            use_flash_attn=self.use_flash_attention,
-        )
+        # Check if local path
+        is_local = Path(self.model_name).exists()
 
-        # Load from local checkpoint if provided
-        if self.pretrained_path is not None:
-            if not self.pretrained_path.exists():
-                raise FileNotFoundError(
-                    f"Pretrained checkpoint not found: {self.pretrained_path}"
-                )
-
-            logger.info(f"Loading DINOv3 from local checkpoint: {self.pretrained_path}")
+        if is_local:
+            logger.info(f"Loading DINOv3 from local checkpoint: {self.model_name}")
+            local_path = Path(self.model_name)
 
             try:
-                # Try loading with transformers
-                model = Dinov2Model.from_pretrained(
-                    self.pretrained_path, config=config, local_files_only=True
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to load with transformers, trying torch.load: {e}"
+                # Try loading with AutoModel (HF format)
+                model = AutoModel.from_pretrained(
+                    local_path,
+                    local_files_only=True,
+                    trust_remote_code=False,  # Security: don't execute remote code
+                    attn_implementation="flash_attention_2"
+                    if self.use_flash_attention
+                    else "eager",
                 )
 
-                # Fallback: Load checkpoint manually
-                model = Dinov2Model(config)
-                checkpoint = torch.load(
-                    self.pretrained_path / "pytorch_model.bin",
-                    map_location="cpu",
-                    weights_only=True,
-                )
-                model.load_state_dict(checkpoint, strict=False)
+                # Try loading processor
+                try:
+                    processor = AutoImageProcessor.from_pretrained(
+                        local_path, local_files_only=True
+                    )
+                except Exception:
+                    logger.warning(
+                        f"Could not load processor from {local_path}, using None"
+                    )
+                    processor = None
 
-        else:
-            # Load from Hugging Face hub (requires internet)
-            model_hub_name = f"facebook/dinov2-{self.model_name.replace('_', '-')}"
-            logger.info(f"Loading DINOv3 from Hugging Face: {model_hub_name}")
-
-            try:
-                model = Dinov2Model.from_pretrained(model_hub_name, config=config)
             except Exception as e:
                 raise RuntimeError(
-                    f"Failed to load model from Hugging Face: {e}\n"
-                    f"Tried: {model_hub_name}\n"
-                    f"Please provide a local checkpoint via pretrained_path"
+                    f"Failed to load DINOv3 from local path: {local_path}\n"
+                    f"Error: {e}\n"
+                    f"\nMake sure the checkpoint is in HuggingFace format:\n"
+                    f"  - config.json\n"
+                    f"  - model.safetensors or pytorch_model.bin\n"
+                    f"  - preprocessor_config.json (optional)\n"
+                    f"\nIf you have raw weights, convert them first."
                 ) from e
 
-        return model
+        else:
+            # Load from HuggingFace Hub
+            logger.info(f"Loading DINOv3 from HuggingFace: {self.model_name}")
+
+            try:
+                model = AutoModel.from_pretrained(
+                    self.model_name,
+                    trust_remote_code=False,  # Security
+                    attn_implementation="flash_attention_2"
+                    if self.use_flash_attention
+                    else "eager",
+                )
+
+                # Load processor
+                try:
+                    processor = AutoImageProcessor.from_pretrained(self.model_name)
+                except Exception:
+                    logger.warning(
+                        f"Could not load processor for {self.model_name}, using None"
+                    )
+                    processor = None
+
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to load DINOv3 from HuggingFace: {self.model_name}\n"
+                    f"Error: {e}\n"
+                    f"\nValid DINOv3 model IDs:\n"
+                    f"  - facebook/dinov3-vitl16-pretrain-lvd1689m (ViT-L/16)\n"
+                    f"  - facebook/dinov3-vith16-pretrain-lvd1689m (ViT-H/16)\n"
+                    f"\nOr provide a local path to DINOv3 checkpoint."
+                ) from e
+
+        # Validate model is actually DINOv3
+        model_class_name = model.__class__.__name__
+        if "dinov" not in model_class_name.lower():
+            logger.warning(
+                f"Loaded model class '{model_class_name}' doesn't look like DINOv3. "
+                f"Make sure you're using the correct checkpoint!"
+            )
+
+        return model, processor
 
     def _freeze_backbone(self) -> None:
         """Freeze all backbone parameters"""
@@ -182,7 +214,8 @@ class DINOv3Backbone(nn.Module):
         Extract features from images
 
         Args:
-            pixel_values: Input images [B, 3, 224, 224]
+            pixel_values: Input images [B, 3, H, W]
+                         (should be preprocessed: normalized, resized to model's expected size)
 
         Returns:
             Features [B, hidden_size]
@@ -214,7 +247,7 @@ class DINOv3Backbone(nn.Module):
         - Dense prediction tasks
 
         Args:
-            pixel_values: Input images [B, 3, 224, 224]
+            pixel_values: Input images [B, 3, H, W]
             layer_indices: Which layers to extract (e.g., [8, 16, 24, 32])
 
         Returns:
@@ -253,6 +286,8 @@ class DINOv3Backbone(nn.Module):
             f"DINOv3Backbone(\n"
             f"  model={self.model_name},\n"
             f"  hidden_size={self.hidden_size},\n"
+            f"  image_size={self.image_size},\n"
+            f"  patch_size={self.patch_size},\n"
             f"  pooling={self.pooling_mode},\n"
             f"  frozen={self.freeze_backbone},\n"
             f"  flash_attn={self.use_flash_attention},\n"
@@ -263,61 +298,100 @@ class DINOv3Backbone(nn.Module):
 
 
 def create_dinov3_backbone(
-    model_name: str = "vit_huge",
-    pretrained_path: Optional[str] = None,
+    model_name: str = "facebook/dinov3-vith16-pretrain-lvd1689m",
     freeze: bool = True,
     flash_attention: bool = False,
+    pooling_mode: str = "cls_token",
 ) -> DINOv3Backbone:
     """
     Factory function to create DINOv3 backbone
 
     Args:
-        model_name: Model variant (vit_small, vit_base, vit_large, vit_giant, vit_huge)
-        pretrained_path: Path to local checkpoint (optional)
+        model_name: HuggingFace model ID or local path
+                    Examples:
+                    - "facebook/dinov3-vitl16-pretrain-lvd1689m" (ViT-L/16, 1024-dim)
+                    - "facebook/dinov3-vith16-pretrain-lvd1689m" (ViT-H/16, 1280-dim)
+                    - "/path/to/local/checkpoint"
         freeze: If True, freeze backbone parameters
         flash_attention: If True, enable Flash Attention 3
+        pooling_mode: "cls_token" or "mean_pool"
 
     Returns:
         DINOv3Backbone instance
     """
     return DINOv3Backbone(
         model_name=model_name,
-        pretrained_path=pretrained_path,
         freeze_backbone=freeze,
         use_flash_attention=flash_attention,
+        pooling_mode=pooling_mode,
     )
 
 
 if __name__ == "__main__":
     # Test backbone creation
     print("Testing DINOv3 Backbone...")
+    print("=" * 80)
 
-    # Test with local checkpoint (if available)
+    # Test 1: Try loading from local checkpoint (if exists)
     local_checkpoint = Path(
         "../../streetvision_cascade/models/stage1_dinov3/dinov3-vith16plus-pretrain-lvd1689m"
     )
 
     if local_checkpoint.exists():
         print(f"\n✅ Found local checkpoint: {local_checkpoint}")
-        backbone = create_dinov3_backbone(
-            model_name="vit_huge",
-            pretrained_path=str(local_checkpoint),
-            freeze=True,
-        )
-        print(backbone)
+        print("\nAttempting to load...")
 
-        # Test forward pass with dummy input
-        dummy_input = torch.randn(2, 3, 224, 224)
-        print(f"\nTesting forward pass with input shape: {dummy_input.shape}")
+        try:
+            backbone = create_dinov3_backbone(
+                model_name=str(local_checkpoint),
+                freeze=True,
+            )
+            print(backbone)
 
-        with torch.no_grad():
-            features = backbone(dummy_input)
+            # Test forward pass
+            dummy_input = torch.randn(2, 3, 224, 224)
+            print(f"\nTesting forward pass with input shape: {dummy_input.shape}")
 
-        print(f"Output features shape: {features.shape}")
-        print(f"Expected: [2, 1280]")
+            with torch.no_grad():
+                features = backbone(dummy_input)
 
-        assert features.shape == (2, 1280), "Output shape mismatch!"
-        print("\n✅ All tests passed!")
+            print(f"Output features shape: {features.shape}")
+            print(f"Expected: [2, {backbone.hidden_size}]")
+
+            assert features.shape == (
+                2,
+                backbone.hidden_size,
+            ), f"Shape mismatch! Got {features.shape}, expected [2, {backbone.hidden_size}]"
+            print("\n✅ All tests passed!")
+
+        except Exception as e:
+            print(f"\n❌ Error loading local checkpoint: {e}")
+            print("\nThis is likely because the checkpoint is not in HuggingFace format.")
+            print("You may need to convert it first.")
+
     else:
         print(f"\n⚠️  Local checkpoint not found: {local_checkpoint}")
-        print("Skipping tests (checkpoint needed)")
+        print("\nTrying to load from HuggingFace Hub (requires internet)...")
+
+        try:
+            # Try ViT-L/16 (smaller, faster to download)
+            backbone = create_dinov3_backbone(
+                model_name="facebook/dinov3-vitl16-pretrain-lvd1689m", freeze=True
+            )
+            print(backbone)
+
+            # Test forward pass
+            dummy_input = torch.randn(2, 3, 224, 224)
+            print(f"\nTesting forward pass with input shape: {dummy_input.shape}")
+
+            with torch.no_grad():
+                features = backbone(dummy_input)
+
+            print(f"Output features shape: {features.shape}")
+            print("\n✅ HuggingFace loading works!")
+
+        except Exception as e:
+            print(f"\n❌ Could not load from HuggingFace: {e}")
+            print("Make sure you have internet connection or provide a local checkpoint.")
+
+    print("\n" + "=" * 80)

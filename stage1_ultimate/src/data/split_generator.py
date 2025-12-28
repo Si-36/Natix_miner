@@ -25,6 +25,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 
 from contracts.split_contracts import Split, SplitValidator
+from data.label_schema import LabelSchema
 
 logger = logging.getLogger(__name__)
 
@@ -227,45 +228,40 @@ class SplitGenerator:
 
     def _class_name_to_label(self, class_name: str) -> int:
         """
-        Map class name to integer label
+        Map class name to integer label using LabelSchema
 
-        You'll need to customize this based on your dataset.
+        CRITICAL: This uses the single source of truth (label_schema.py).
+        No fallbacks - fail-fast if class is unknown.
 
         Args:
             class_name: Name of the class directory
 
         Returns:
             Integer label (0-12 for 13 classes)
+
+        Raises:
+            ValueError: If class name is unknown
         """
-        # Example mapping for NATIX roadwork classes
-        class_mapping = {
-            "no_damage": 0,
-            "longitudinal_crack": 1,
-            "transverse_crack": 2,
-            "alligator_crack": 3,
-            "pothole": 4,
-            "repair": 5,
-            "crosswalk": 6,
-            "manhole": 7,
-            "joint": 8,
-            "marking": 9,
-            "bump": 10,
-            "depression": 11,
-            "other": 12,
-        }
-
-        if class_name in class_mapping:
-            return class_mapping[class_name]
-
-        # Try to parse as integer
+        # CRITICAL: Use LabelSchema (single source of truth)
         try:
-            return int(class_name)
+            return LabelSchema.get_class_id(class_name)
         except ValueError:
-            logger.warning(
-                f"Unknown class name: {class_name}, assigning sequential label"
-            )
-            # Assign sequential label (fallback)
-            return hash(class_name) % 13
+            # Try to parse as integer (for datasets with numeric class dirs)
+            try:
+                label = int(class_name)
+                LabelSchema.validate_label(label)  # Validate range
+                return label
+            except (ValueError, ValueError):
+                # CRITICAL: Fail-fast instead of guessing
+                raise ValueError(
+                    f"Unknown class directory: '{class_name}'\n"
+                    f"Valid class names: {LabelSchema.CLASS_NAMES}\n"
+                    f"Or use integer directories: 0-{LabelSchema.NUM_CLASSES-1}\n"
+                    f"Found in: {self.data_root / class_name}\n"
+                    f"\n"
+                    f"FIX: Either rename the directory to a valid class name,\n"
+                    f"     or add the new class to src/data/label_schema.py"
+                ) from None
 
     def _stratified_split(
         self, samples: list[ImageSample], labels: np.ndarray

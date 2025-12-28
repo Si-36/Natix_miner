@@ -23,6 +23,7 @@ from torch.utils.data import DataLoader
 
 from data.natix_dataset import NATIXDataset
 from contracts.split_contracts import Split
+from data.label_schema import LabelSchema
 
 logger = logging.getLogger(__name__)
 
@@ -196,33 +197,55 @@ class NATIXDataModule(L.LightningDataModule):
             drop_last=True,  # Drop incomplete batches for stable training
         )
 
-    def val_dataloader(self) -> DataLoader:
+    def val_dataloader(self) -> list[DataLoader]:
         """
-        Create validation dataloader (val_select)
+        Create validation dataloaders (BOTH val_select AND val_calib)
 
-        This is used for:
-        - Early stopping
-        - Model selection
-        - Hyperparameter tuning
+        CRITICAL FIX: Returns TWO loaders to prevent data leakage:
+        - Loader 0 (val_select): For early stopping / model selection
+        - Loader 1 (val_calib): For policy fitting / calibration
 
-        CRITICAL: This should NEVER be used for policy fitting or calibration!
-                  Use val_calib_dataloader() for that.
+        Lightning will call validation_step() with dataloader_idx to distinguish them.
 
         Returns:
-            DataLoader for validation set (val_select)
+            List of [val_select_loader, val_calib_loader]
         """
         if self.val_select_dataset is None:
             raise RuntimeError("val_select_dataset is None. Call setup('fit') first.")
 
-        return DataLoader(
+        # Create val_calib dataset if not exists
+        if self.val_calib_dataset is None:
+            self.val_calib_dataset = NATIXDataset(
+                data_root=self.data_root,
+                splits_json=self.splits_json,
+                split=Split.VAL_CALIB,
+                transform=None,
+            )
+
+        # Loader 0: val_select (for model selection)
+        val_select_loader = DataLoader(
             self.val_select_dataset,
             batch_size=self.batch_size,
-            shuffle=False,  # No shuffling for validation
+            shuffle=False,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
             persistent_workers=self.persistent_workers,
-            drop_last=False,  # Keep all validation samples
+            drop_last=False,
         )
+
+        # Loader 1: val_calib (for calibration)
+        val_calib_loader = DataLoader(
+            self.val_calib_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+            persistent_workers=self.persistent_workers,
+            drop_last=False,
+        )
+
+        # CRITICAL: Return BOTH loaders
+        return [val_select_loader, val_calib_loader]
 
     def test_dataloader(self) -> DataLoader:
         """
@@ -294,8 +317,8 @@ class NATIXDataModule(L.LightningDataModule):
 
     @property
     def num_classes(self) -> int:
-        """Number of classes in dataset"""
-        return 13  # NATIX roadwork has 13 classes
+        """Number of classes in dataset (from LabelSchema)"""
+        return LabelSchema.NUM_CLASSES  # CRITICAL: Use single source of truth
 
     def __repr__(self) -> str:
         """String representation"""

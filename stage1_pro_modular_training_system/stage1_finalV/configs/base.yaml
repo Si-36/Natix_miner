@@ -1,0 +1,196 @@
+# ============================================================================
+# Base Configuration - Shared Settings (Structured + Type-Safe)
+# ============================================================================
+# Implements TODO 128: Base config with all shared settings
+
+paths:
+  output_dir: ${oc.env:OUTPUT_DIR,override:outputs}
+  # Can override with: OUTPUT_DIR=/custom/path
+
+run:
+  seed: 42                      # Reproducible runs
+  deterministic: true             # PyTorch determinism
+  verbose: true                 # Detailed logging
+
+# =============================================================================
+# Training Modes (Config-Driven, SSH-Ready)
+# =============================================================================
+# Implements training mode switch (no rewrites needed later)
+
+training:
+  mode: frozen                   # frozen | unfreeze_last_n | peft_lora | peft_dora | full
+  last_n_blocks: 2             # Number of last blocks to unfreeze (for unfreeze_last_n)
+  
+  # Optimizer parameter groups (head LR vs backbone LR)
+  optimizer:
+    name: adamw               # adamw | sam | sophia
+    lr_head: 1e-3
+    lr_backbone: 1e-4          # Backbone LR (smaller for FT)
+    weight_decay: 0.01
+    betas: [0.9, 0.999]
+    
+  # Scheduler
+  scheduler:
+    name: cosine               # cosine | plateau | exponential
+    warmup_epochs: 5
+    warmup_start_lr: 1e-5
+
+# =============================================================================
+# Model Configuration (Model-Swap-Proof)
+# =============================================================================
+
+model:
+  family: dinov3                # Model family (dinov3 | dinov2 | vit)
+  model_id: facebook/dinov3-vits16-pretrain-lvd1689m  # LOCAL (21M params)
+  # SSH later: facebook/dinov3-vitb16-pretrain-lvd1689m (86M params)
+  # SSH later: facebook/dinov3-vith16plus-pretrain-lvd1689m (840M params)
+  
+  freeze_backbone: true         # Override with CLI: --model.mode=frozen|unfreeze|peft
+  use_flash_attn: false         # Flash Attention 3 (GPU-dependent)
+  compile_model: true            # torch.compile (30-50% speedup)
+  dtype: float16               # bfloat16 | float16 | float32
+  
+  # Model-swap-proof: head auto-detects embed_dim from model
+  head:
+    hidden_dim: 512
+    num_classes: 2
+    dropout: 0.1
+    use_bn: true
+    use_residual: false
+
+# =============================================================================
+# Data Configuration
+# =============================================================================
+
+data:
+  num_workers: 4
+  pin_memory: true
+  prefetch_factor: 2
+  
+  # Split usage (enforced by SplitContracts)
+  splits:
+    train: train
+    val_select: val_select       # Model selection ONLY
+    val_calib: val_calib        # Policy fitting ONLY
+    val_test: val_test            # Final eval ONLY
+  
+  # Class imbalance handling
+  class_imbalance:
+    use_weighted_loss: true     # Weighted sampler or focal loss
+    use_focal_loss: false       # TODO 71 (optional)
+    focal_gamma: 2.0
+    focal_alpha: 0.25
+
+# =============================================================================
+# Lightning Configuration
+# =============================================================================
+
+lightning:
+  max_epochs: 50
+  batch_size: 32
+  accumulate_grad_batches: 1
+  precision: bf16                # bf16 | 16 | 32
+  devices: 1                    # Single GPU
+  
+  # Early stopping (monitor ONLY val_select!)
+  early_stopping:
+    monitor: val_select/acc     # NEVER use val_calib for selection!
+    patience: 5
+    mode: max
+    min_delta: 0.001
+  
+  # Checkpointing
+  checkpointing:
+    monitor: val_select/acc     # NEVER use val_calib for selection!
+    save_top_k: 1
+    every_n_epochs: 1
+    filename: "epoch{epoch:02d}-val_select{acc:.4f}.pth"
+  
+  # Mixed precision
+  mixed_precision:
+    use: true                  # Auto-mixed precision
+    loss_scale: 128.0
+
+# =============================================================================
+# Evaluation Configuration
+# =============================================================================
+
+evaluation:
+  metrics:
+    - accuracy
+    - precision
+    - recall
+    - f1_score
+    - auroc
+    - average_precision
+    - ece                     # Expected Calibration Error
+    - brier_score
+  
+  # Slice metrics (detect drift by conditions)
+  slices:
+    - time_of_day
+    - weather_condition
+    - camera_id
+
+# =============================================================================
+# Logging Configuration
+# =============================================================================
+
+logging:
+  logger: wandb                # wandb | tensorboard | mlflow
+  log_every_n_steps: 50
+  log_graph: true
+  save_codes: true
+  
+  wandb:
+    project: "natix-miner"
+    entity: null
+    offline: false
+  
+  tensorboard:
+    log_dir: tensorboard
+
+# =============================================================================
+# Calibration Configuration (TorchCP - Library-Backed)
+# =============================================================================
+
+calibration:
+  method: torchcp              # torchcp | temperature | beta | isotonic | ensemble
+  alpha: 0.1                 # Target coverage (90% coverage)
+  score_type: aps               # aps | raps | saps | thr | margin
+  randomized: true              # Randomized conformal
+  
+  torchcp:
+    temperature: 1.0            # Optional temperature scaling
+    k_reg: 0                   # RAPS regularization parameter
+    lambda_star: null           # SAPS parameter
+
+# =============================================================================
+# Loss Configuration (Optional / Ablation)
+# =============================================================================
+
+loss:
+  base: cross_entropy          # cross_entropy | focal | label_smoothing
+  
+  focal:
+    enabled: false
+    gamma: 2.0
+    alpha: 0.25
+  
+  label_smoothing:
+    enabled: false
+    epsilon: 0.1
+  
+  # Optional SOTA losses (guarded by config flags)
+  gatekeeper:
+    enabled: false               # TODO 51 (cascade-specific)
+    alpha: 0.5                 # Balance accuracy vs calibration
+  
+  supcon:
+    enabled: false               # TODO 52 (contrastive mode)
+    temperature: 0.07
+  
+  koleo:
+    enabled: false               # TODO 53 (DINO fine-tuning stability)
+    weight: 0.1
+
