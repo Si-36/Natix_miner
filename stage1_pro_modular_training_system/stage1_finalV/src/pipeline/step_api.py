@@ -6,12 +6,10 @@ StepSpec, StepContext, StepResult - TYPED for production-grade contracts
 from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Generic, TypeVar, Dict, List, Optional, FrozenSet, Any
+from typing import Generic, TypeVar, Dict, List, Optional, FrozenSet, Any, Protocol, runtime_checkable
 from enum import Enum
 import json
 from datetime import datetime
-import hashlib
-
 
 # ============================================================================
 # StepResult - Typed Step Execution Result
@@ -30,8 +28,8 @@ class StepResult:
     """
     artifacts_written: List[str]  # Canonical artifact keys produced
     splits_used: FrozenSet[str]  # Splits actually used
-    metrics: Optional[Dict[str, Any]]  # Runtime metrics (timings, sizes)
-    metadata: Dict[str, Any]  # Owners, tags, runtime stats
+    metrics: Optional[Dict[str, Any]] = None  # Runtime metrics (timings, sizes)
+    metadata: Dict[str, Any] = field(default_factory=dict)  # Owners, tags, runtime stats
     
     def __post_init__(self):
         """Validate results after initialization"""
@@ -58,6 +56,8 @@ class StepContext:
     - config: Resolved Hydra config snapshot
     - run_id: Current run identifier
     - artifact_root: Artifact store root (for path resolution)
+    - artifact_store: ArtifactStore instance (for artifact I/O)
+    - manifest: RunManifest instance (for lineage tracking)
     - metadata: Step-level metadata (owners, tags)
     - state: Optional runtime state (for step chaining)
     """
@@ -65,6 +65,8 @@ class StepContext:
     config: Dict[str, Any]  # Resolved Hydra config (snapshot)
     run_id: str  # Current run ID (YYYYMMDD-HHMMSS)
     artifact_root: Path  # Root for artifact path resolution
+    artifact_store: Any  # ArtifactStore instance (for artifact I/O)
+    manifest: Any  # RunManifest instance (for lineage tracking)
     metadata: Dict[str, str] = field(default_factory=dict)  # Owners, tags
     state: Optional[Dict[str, Any]] = None  # Runtime state (for step chaining)
     
@@ -79,7 +81,7 @@ class StepContext:
 # StepSpec - Abstract Base for All Steps
 # ============================================================================
 
-class StepSpec(ABC):
+class StepSpec(Protocol):
     """
     Abstract base class for all step specifications.
     
@@ -95,19 +97,41 @@ class StepSpec(ABC):
     - run(ctx): Execute step logic
     
     This design enforces "hidden contracts" so steps can't:
-    - Use unauthorized splits (leak-proof)
+    - Use unauthorized splits (leak-proof!)
     - Access missing artifacts (fail-fast dependency)
     - Write artifacts outside declared outputs (forbidden)
     """
     
-    step_id: str
-    name: str
-    deps: List[str] = field(default_factory=list)
-    order_index: Optional[int] = None  # Optional ordering hint
-    owners: List[str] = field(default_factory=list)
-    tags: Dict[str, str] = field(default_factory=dict)
+    @property
+    def step_id(self) -> str:
+        """Unique step identifier (e.g., train_baseline_head)"""
+        ...
     
-    @abstractmethod
+    @property
+    def name(self) -> str:
+        """Human-readable step name (e.g., Train Baseline Head)"""
+        ...
+    
+    @property
+    def deps(self) -> List[str]:
+        """List of step names this step depends on"""
+        ...
+    
+    @property
+    def order_index(self) -> Optional[int]:
+        """Optional ordering hint for execution"""
+        ...
+    
+    @property
+    def owners(self) -> List[str]:
+        """List of owner identifiers"""
+        ...
+    
+    @property
+    def tags(self) -> Dict[str, str]:
+        """Dict of tag key-values"""
+        ...
+    
     def inputs(self, ctx: StepContext) -> List[str]:
         """
         Declare required input artifacts for this step.
@@ -118,9 +142,8 @@ class StepSpec(ABC):
         Example:
             return [ArtifactKey.MODEL_CHECKPOINT, ArtifactKey.CALIB_LOGITS]
         """
-        pass
+        ...
     
-    @abstractmethod
     def outputs(self, ctx: StepContext) -> List[str]:
         """
         Declare output artifacts this step produces.
@@ -131,9 +154,8 @@ class StepSpec(ABC):
         Example:
             return [ArtifactKey.THRESHOLDS_JSON, ArtifactKey.METRICS_CSV]
         """
-        pass
+        ...
     
-    @abstractmethod
     def allowed_splits(self) -> FrozenSet[str]:
         """
         Declare which data splits this step is allowed to use.
@@ -147,35 +169,24 @@ class StepSpec(ABC):
         Example (calibration step):
             return frozenset([Split.VAL_CALIB])
         """
-        pass
+        ...
     
-    @abstractmethod
     def run(self, ctx: StepContext) -> StepResult:
         """
         Execute step logic.
         
         Args:
-            ctx: Runtime context with artifact_root, config, etc.
+            ctx: Runtime context with artifact_root, config, run_id, etc.
         
         Returns:
             StepResult with artifacts_written, splits_used, metrics, metadata
         """
-        pass
-    
-    def __post_init__(self):
-        """Validate spec after initialization"""
-        # Ensure deps is a list
-        if not isinstance(self.deps, list):
-            raise TypeError("deps must be a list")
-        
-        # Ensure name is a non-empty string
-        if not isinstance(self.name, str) or not self.name:
-            raise TypeError("name must be a non-empty string")
+        ...
 
 
 __all__ = [
-    "StepSpec",
-    "StepContext",
     "StepResult",
+    "StepContext",
+    "StepSpec",
 ]
 

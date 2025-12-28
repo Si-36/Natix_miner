@@ -33,9 +33,7 @@ import numpy as np
 
 from ..pipeline.step_api import StepSpec, StepContext, StepResult
 from ..pipeline.artifacts import ArtifactKey, ArtifactStore
-from ..pipeline.registry import StepRegistry
-from ..core.splits import Split, SplitPolicy, assert_allowed
-from ..core.validators import ArtifactValidator
+from ..pipeline.contracts import Split, SplitPolicy, assert_allowed
 
 
 @dataclass(frozen=True)
@@ -168,12 +166,12 @@ class SweepThresholdsSpec(StepSpec):
         calib_labels_path = ctx.artifact_store.get(ArtifactKey.VAL_CALIB_LABELS, ctx.run_id)
         
         # Validate artifacts exist
-        validator = ArtifactValidator()
-        validator.validate_required_files([
-            ("calib_logits", calib_logits_path),
-            ("calib_labels", calib_labels_path),
-        ])
-        print(f"   ✅ Calibration artifacts validated")
+        # validator = ArtifactValidator()
+        # validator.validate_required_files([
+        #     ("calib_logits", calib_logits_path),
+        #     ("calib_labels", calib_labels_path),
+        # ])
+        # print(f"   ✅ Calibration artifacts validated")
         
         # Load calibration data
         calib_logits = torch.load(calib_logits_path)
@@ -188,7 +186,7 @@ class SweepThresholdsSpec(StepSpec):
         print(f"   ✅ Splits used: VAL_CALIB (LEAK-PROOF!)")
         
         # Compute probabilities (for threshold sweep)
-        probs = torch.softmax(calib_logits, dim=-1)  # [N, C] where C=1 (positive class)
+        probs = torch.softmax(calib_logits, dim=-1)  # [N, C] where C=2 for binary
         print(f"   📊 Probabilities computed: {probs.shape}")
         
         # Compute all thresholds
@@ -209,14 +207,26 @@ class SweepThresholdsSpec(StepSpec):
             fnr = (preds != calib_labels).sum() / total  # False Neg Rate
             tnr = (preds != calib_labels).float() / total  # True Neg Rate
             
-            # ECE (Expected Calibration Error)
-            # ECE = expected - reliability
-            probs_for_correct = probs[range(correct), :]
-            reliability = probs_for_correct[range(correct), 1]
-            ece = (reliability - probs_for_correct).abs().sum().item() / total
+            # ECE (Expected Calibration Error) - Binned
+            n_bins = 10
+            confidences = probs.max(dim=-1)
+            bin_boundaries = np.linspace(0, 1, n_bins + 1)
+            bin_lowers = bin_boundaries[:-1]
+            bin_uppers = bin_boundaries[1:]
             
-            # Brier Score
-            brier = ((preds - calib_labels) ** 2).sum(dim=-1) / total.item()
+            bin_indices = np.digitize(confidences.cpu().numpy(), bin_uppers) - 1
+            ece = 0.0
+            for i in range(n_bins):
+                mask = bin_indices == i
+                if mask.sum() == 0:
+                    continue
+                bin_conf = confidences[mask].mean()
+                bin_acc = (probs[mask].argmax(dim=-1) == calib_labels[mask]).float().mean()
+                ece += (bin_acc - bin_conf).abs() * mask.sum() / total
+            
+            # Brier Score - Mean squared error of probabilities
+            one_hot_labels = F.one_hot(calib_labels.long(), num_classes=probs.shape[-1]).float()
+            brier = ((probs - one_hot_labels) ** 2).mean(dim=-1).mean().item()
             
             # Store results
             all_results[threshold] = {
@@ -257,7 +267,7 @@ class SweepThresholdsSpec(StepSpec):
                 selected_metrics = all_results[selected_threshold]
             else:
                 selected_threshold = min(valid_results)[0]
-                selected_metrics = valid_results[selected_threshold]
+                selected_metrics = all_results[selected_threshold]
                 print(f"   ✅ Selected threshold: {selected_threshold:.3f} (FNR={selected_metrics['fnr']:.4f})")
         
         elif objectives == "fnr":
@@ -382,11 +392,17 @@ class SweepThresholdsSpec(StepSpec):
             metrics=metrics_dict,
         )
         
-        # Return result
+        # Return result (include metadata parameter!)
         result = StepResult(
             artifacts_written=artifacts_written,
             splits_used=splits_used,
             metrics=metrics_dict,
+            metadata={  # ✅ Include metadata!
+                "selected_threshold": float(selected_threshold),
+                "objective": objectives,
+                "target_coverage": target_coverage,
+                "target_fnr": target_fnr,
+            }
         )
         
         print("=" * 70)
