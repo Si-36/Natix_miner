@@ -29,6 +29,7 @@ from contracts.split_contracts import Split
 
 class PhaseType(Enum):
     """All phases in the training pipeline"""
+
     PHASE1_BASELINE = "phase1_baseline"
     PHASE2_THRESHOLD = "phase2_threshold"
     PHASE3_GATE = "phase3_gate"
@@ -39,10 +40,11 @@ class PhaseType(Enum):
 
 class ExecutionMode(Enum):
     """Execution mode for a phase"""
-    TRAINING = "training"           # Requires GPU, long-running
-    INFERENCE = "inference"         # Requires GPU, medium-running
+
+    TRAINING = "training"  # Requires GPU, long-running
+    INFERENCE = "inference"  # Requires GPU, medium-running
     POLICY_FITTING = "policy_fitting"  # CPU-only, fast
-    EXPORT = "export"              # CPU-only, fast
+    EXPORT = "export"  # CPU-only, fast
 
 
 @dataclass(slots=True, frozen=True)
@@ -54,6 +56,7 @@ class ResourceRequirements:
     - Explicit resource declarations
     - Used for scheduling and validation
     """
+
     requires_gpu: bool = True
     min_gpu_memory_gb: float = 16.0
     min_cpu_memory_gb: float = 32.0
@@ -131,9 +134,7 @@ class PhaseSpec:
         input_paths = []
         for artifact_name in self.input_artifacts:
             if not hasattr(artifacts, artifact_name):
-                raise AttributeError(
-                    f"ArtifactSchema has no attribute '{artifact_name}'"
-                )
+                raise AttributeError(f"ArtifactSchema has no attribute '{artifact_name}'")
             input_paths.append(getattr(artifacts, artifact_name))
 
         # Check existence
@@ -169,9 +170,7 @@ class PhaseSpec:
         output_paths = []
         for artifact_name in self.output_artifacts:
             if not hasattr(artifacts, artifact_name):
-                raise AttributeError(
-                    f"ArtifactSchema has no attribute '{artifact_name}'"
-                )
+                raise AttributeError(f"ArtifactSchema has no attribute '{artifact_name}'")
             output_paths.append(getattr(artifacts, artifact_name))
 
         # Check existence
@@ -190,6 +189,7 @@ class PhaseSpec:
 
 
 # ============= PHASE SPECIFICATIONS =============
+
 
 def create_phase1_spec() -> PhaseSpec:
     """Phase 1: Baseline Training"""
@@ -319,8 +319,7 @@ def create_phase5_spec() -> PhaseSpec:
         phase_type=PhaseType.PHASE5_SCRC,
         name="Phase 5: SCRC Calibration",
         description=(
-            "Fit SCRC calibration parameters on val_calib.\n"
-            "Outputs: SCRC parameters JSON."
+            "Fit SCRC calibration parameters on val_calib.\nOutputs: SCRC parameters JSON."
         ),
         dependencies=[PhaseType.PHASE1_BASELINE],
         input_artifacts=["phase1_checkpoint", "val_calib_logits"],
@@ -348,8 +347,7 @@ def create_phase6_spec() -> PhaseSpec:
         phase_type=PhaseType.PHASE6_BUNDLE,
         name="Phase 6: Bundle Export",
         description=(
-            "Export final deployment bundle.\n"
-            "Outputs: bundle.json (model + EXACTLY ONE policy)."
+            "Export final deployment bundle.\nOutputs: bundle.json (model + EXACTLY ONE policy)."
         ),
         dependencies=[PhaseType.PHASE1_BASELINE],  # At minimum needs Phase 1
         input_artifacts=["phase1_checkpoint", "splits_json"],
@@ -372,6 +370,7 @@ def create_phase6_spec() -> PhaseSpec:
 
 
 # ============= PHASE REGISTRY =============
+
 
 @dataclass(frozen=True, slots=True)
 class PhaseRegistry:
@@ -441,9 +440,7 @@ class PhaseRegistry:
 
         # Check for cycles
         if len(result) != len(phases_to_run):
-            raise ValueError(
-                f"Circular dependency detected in phases: {phases_to_run}"
-            )
+            raise ValueError(f"Circular dependency detected in phases: {phases_to_run}")
 
         return result
 

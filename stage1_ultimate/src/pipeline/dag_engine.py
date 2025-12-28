@@ -29,7 +29,11 @@ from typing import Dict, List, Optional, Callable, Any
 from enum import Enum
 import json
 import time
+import logging
 from datetime import datetime
+
+# Setup logger for this module
+logger = logging.getLogger(__name__)
 
 from pipeline.phase_spec import (
     PhaseType,
@@ -43,6 +47,7 @@ from contracts.validators import ArtifactValidator
 
 class PhaseStatus(Enum):
     """Status of a phase in the pipeline"""
+
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -60,6 +65,7 @@ class PhaseExecution:
     - Start/end times
     - Error messages if failed
     """
+
     phase_type: PhaseType
     status: PhaseStatus = PhaseStatus.PENDING
     start_time: Optional[float] = None
@@ -105,6 +111,7 @@ class PipelineState:
     - Overall progress
     - Can be saved/loaded for resuming
     """
+
     executions: Dict[PhaseType, PhaseExecution] = field(default_factory=dict)
     start_time: Optional[float] = None
     end_time: Optional[float] = None
@@ -162,9 +169,7 @@ class PipelineState:
     def to_dict(self) -> Dict:
         """Convert to dictionary for JSON serialization"""
         return {
-            "executions": {
-                k.value: v.to_dict() for k, v in self.executions.items()
-            },
+            "executions": {k.value: v.to_dict() for k, v in self.executions.items()},
             "start_time": self.start_time,
             "end_time": self.end_time,
         }
@@ -229,7 +234,6 @@ class DAGEngine:
     registry: PhaseRegistry = field(default_factory=get_phase_registry)
     state: PipelineState = field(default_factory=PipelineState)
     phase_executors: Dict[PhaseType, Callable] = field(default_factory=dict)
-    verbose: bool = True
 
     def register_executor(
         self,
@@ -244,12 +248,7 @@ class DAGEngine:
             executor: Callable that takes ArtifactSchema and executes the phase
         """
         self.phase_executors[phase_type] = executor
-
-    def _log(self, message: str) -> None:
-        """Log a message if verbose is enabled"""
-        if self.verbose:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            print(f"[{timestamp}] {message}")
+        logger.debug(f"Registered executor for {phase_type.value}")
 
     def _validate_phase_inputs(self, phase: PhaseSpec) -> bool:
         """
@@ -264,7 +263,7 @@ class DAGEngine:
         Raises:
             FileNotFoundError: If any input is missing
         """
-        self._log(f"  Validating inputs for {phase.name}...")
+        logger.info(f"  Validating inputs for {phase.name}...")
         return phase.validate_inputs(self.artifacts)
 
     def _validate_phase_outputs(self, phase: PhaseSpec) -> bool:
@@ -281,7 +280,7 @@ class DAGEngine:
             FileNotFoundError: If any output is missing
             ValidationError: If any output is invalid
         """
-        self._log(f"  Validating outputs for {phase.name}...")
+        logger.info(f"  Validating outputs for {phase.name}...")
         return phase.validate_outputs(self.artifacts)
 
     def _execute_phase(self, phase: PhaseSpec) -> None:
@@ -302,7 +301,7 @@ class DAGEngine:
             )
 
         executor = self.phase_executors[phase.phase_type]
-        self._log(f"  Executing {phase.name}...")
+        logger.info(f"  Executing {phase.name}...")
 
         # Execute phase
         executor(self.artifacts)
@@ -344,13 +343,13 @@ class DAGEngine:
         """
         phase = self.registry.get_phase(phase_type)
 
-        self._log(f"\n{'='*80}")
-        self._log(f"Running: {phase.name}")
-        self._log(f"{'='*80}")
+        logger.info(f"\n{'=' * 80}")
+        logger.info(f"Running: {phase.name}")
+        logger.info(f"{'=' * 80}")
 
         # Check if already completed
         if self.state.is_completed(phase_type):
-            self._log(f"  ✅ Already completed, skipping...")
+            logger.info(f"  ✅ Already completed, skipping...")
             return
 
         # Check dependencies
@@ -373,13 +372,13 @@ class DAGEngine:
             self.state.mark_completed(phase_type)
 
             duration = self.state.executions[phase_type].duration_minutes
-            self._log(f"  ✅ Completed in {duration:.1f} minutes")
+            logger.info(f"  ✅ Completed in {duration:.1f} minutes")
 
         except Exception as e:
             # Mark as failed
             error_message = str(e)
             self.state.mark_failed(phase_type, error_message)
-            self._log(f"  ❌ Failed: {error_message}")
+            logger.info(f"  ❌ Failed: {error_message}")
             raise
 
     def run(self, phases_to_run: List[PhaseType]) -> None:
@@ -398,11 +397,11 @@ class DAGEngine:
         # Get execution order
         execution_order = self.registry.get_execution_order(phases_to_run)
 
-        self._log(f"\n{'='*80}")
-        self._log(f"DAG Pipeline Execution")
-        self._log(f"{'='*80}")
-        self._log(f"Phases to run: {[p.value for p in execution_order]}")
-        self._log(f"{'='*80}\n")
+        logger.info(f"\n{'=' * 80}")
+        logger.info(f"DAG Pipeline Execution")
+        logger.info(f"{'=' * 80}")
+        logger.info(f"Phases to run: {[p.value for p in execution_order]}")
+        logger.info(f"{'=' * 80}\n")
 
         # Start pipeline
         self.state.start_time = time.time()
@@ -432,7 +431,7 @@ class DAGEngine:
 
         # Load state
         self.state = PipelineState.load(state_path)
-        self._log(f"Resumed from state: {state_path}")
+        logger.info(f"Resumed from state: {state_path}")
 
         # Print current status
         self._print_summary()
@@ -445,13 +444,13 @@ class DAGEngine:
             state_path: Path to save pipeline state JSON
         """
         self.state.save(state_path)
-        self._log(f"Saved state to: {state_path}")
+        logger.info(f"Saved state to: {state_path}")
 
     def _print_summary(self) -> None:
         """Print execution summary"""
-        self._log(f"\n{'='*80}")
-        self._log(f"Pipeline Execution Summary")
-        self._log(f"{'='*80}")
+        logger.info(f"\n{'=' * 80}")
+        logger.info(f"Pipeline Execution Summary")
+        logger.info(f"{'=' * 80}")
 
         for phase_type, execution in self.state.executions.items():
             status_emoji = {
@@ -466,14 +465,14 @@ class DAGEngine:
             if execution.duration_minutes is not None:
                 duration_str = f" ({execution.duration_minutes:.1f} min)"
 
-            self._log(
+            logger.info(
                 f"{status_emoji} {phase_type.value}: {execution.status.value}{duration_str}"
             )
 
             if execution.error_message:
-                self._log(f"   Error: {execution.error_message}")
+                logger.info(f"   Error: {execution.error_message}")
 
-        self._log(f"{'='*80}\n")
+        logger.info(f"{'=' * 80}\n")
 
 
 if __name__ == "__main__":
@@ -500,8 +499,8 @@ if __name__ == "__main__":
     # Test execution order
     phases_to_run = [
         PhaseType.PHASE2_THRESHOLD,  # Depends on Phase 1
-        PhaseType.PHASE1_BASELINE,   # No dependencies
-        PhaseType.PHASE6_BUNDLE,     # Depends on Phase 1
+        PhaseType.PHASE1_BASELINE,  # No dependencies
+        PhaseType.PHASE6_BUNDLE,  # Depends on Phase 1
     ]
 
     print("Test: Get execution order")
@@ -514,5 +513,6 @@ if __name__ == "__main__":
 
     # Cleanup
     import shutil
+
     if Path("test_outputs").exists():
         shutil.rmtree("test_outputs")

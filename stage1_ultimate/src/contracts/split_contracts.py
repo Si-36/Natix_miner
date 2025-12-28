@@ -39,17 +39,18 @@ class Split(Enum):
 
     TRAIN = "train"
     VAL_SELECT = "val_select"  # Model selection
-    VAL_CALIB = "val_calib"    # Policy fitting
-    VAL_TEST = "val_test"      # Final evaluation
+    VAL_CALIB = "val_calib"  # Policy fitting
+    VAL_TEST = "val_test"  # Final evaluation
 
 
-# Type alias for split usage (2025-2026 style)
+# Type alias for split usage (Python 3.12+ - MODERN and CLEAN!)
 type SplitSet = Set[Split]
 type SplitUsageMode = Literal["training", "model_selection", "policy_fitting", "final_eval"]
 
 
 class LeakageViolationError(Exception):
     """Raised when split contract is violated (data leakage detected)"""
+
     pass
 
 
@@ -76,11 +77,13 @@ class SplitPolicy:
     FINAL_EVAL_SPLITS: SplitSet = frozenset({Split.VAL_TEST})
 
     # Training can use train + val_select (for early stopping) + val_calib (save logits)
-    TRAINING_ALLOWED_SPLITS: SplitSet = frozenset({
-        Split.TRAIN,
-        Split.VAL_SELECT,  # For early stopping
-        Split.VAL_CALIB,   # Save logits for policy fitting later
-    })
+    TRAINING_ALLOWED_SPLITS: SplitSet = frozenset(
+        {
+            Split.TRAIN,
+            Split.VAL_SELECT,  # For early stopping
+            Split.VAL_CALIB,  # Save logits for policy fitting later
+        }
+    )
 
     @staticmethod
     def validate_model_selection(splits_used: SplitSet) -> bool:

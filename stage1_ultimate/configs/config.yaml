@@ -19,9 +19,9 @@ defaults:
   - evaluation: default  # Default evaluation config
   - _self_  # Include this config last (for overrides)
 
-# Output paths
-output_dir: outputs
+# Output paths (Hydra will manage these)
 experiment_name: stage1_ultimate
+output_dir: ${hydra:runtime.output_dir}  # Use Hydra's runtime dir - prevents path confusion!
 
 # Pipeline configuration
 pipeline:
@@ -116,6 +116,6 @@ checkpointing:
 # Hydra configuration
 hydra:
   run:
-    dir: ${output_dir}/${experiment_name}
+    dir: outputs/${experiment_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}  # Timestamped runs
   job:
-    chdir: true
+    chdir: false  # Don't change working directory - keeps paths predictable!

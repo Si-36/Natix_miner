@@ -32,31 +32,37 @@ import json
 
 class ArtifactValidationError(Exception):
     """Raised when artifact validation fails"""
+
     pass
 
 
 class CheckpointValidationError(ArtifactValidationError):
     """Raised when checkpoint validation fails"""
+
     pass
 
 
 class LogitsValidationError(ArtifactValidationError):
     """Raised when logits validation fails"""
+
     pass
 
 
 class LabelsValidationError(ArtifactValidationError):
     """Raised when labels validation fails"""
+
     pass
 
 
 class PolicyValidationError(ArtifactValidationError):
     """Raised when policy JSON validation fails"""
+
     pass
 
 
 class BundleValidationError(ArtifactValidationError):
     """Raised when bundle validation fails"""
+
     pass
 
 
@@ -97,24 +103,19 @@ class CheckpointValidator:
         # Check existence
         if not path.exists():
             raise CheckpointValidationError(
-                f"❌ Checkpoint not found: {path}\n"
-                f"Expected checkpoint file does not exist."
+                f"❌ Checkpoint not found: {path}\nExpected checkpoint file does not exist."
             )
 
         # Check loadability
         try:
             checkpoint = torch.load(path, map_location="cpu")
         except Exception as e:
-            raise CheckpointValidationError(
-                f"❌ Failed to load checkpoint: {path}\n"
-                f"Error: {e}"
-            )
+            raise CheckpointValidationError(f"❌ Failed to load checkpoint: {path}\nError: {e}")
 
         # Check type
         if not isinstance(checkpoint, dict):
             raise CheckpointValidationError(
-                f"❌ Checkpoint is not a dict: {path}\n"
-                f"Got type: {type(checkpoint)}"
+                f"❌ Checkpoint is not a dict: {path}\nGot type: {type(checkpoint)}"
             )
 
         # Check required keys
@@ -192,8 +193,7 @@ class LogitsValidator:
         # Check existence
         if not path.exists():
             raise LogitsValidationError(
-                f"❌ Logits file not found: {path}\n"
-                f"Expected logits file does not exist."
+                f"❌ Logits file not found: {path}\nExpected logits file does not exist."
             )
 
         # Load based on extension
@@ -208,20 +208,15 @@ class LogitsValidator:
                 logits = np.load(path)
             else:
                 raise LogitsValidationError(
-                    f"❌ Unsupported logits file format: {path.suffix}\n"
-                    f"Supported: .pt, .npy"
+                    f"❌ Unsupported logits file format: {path.suffix}\nSupported: .pt, .npy"
                 )
         except Exception as e:
-            raise LogitsValidationError(
-                f"❌ Failed to load logits: {path}\n"
-                f"Error: {e}"
-            )
+            raise LogitsValidationError(f"❌ Failed to load logits: {path}\nError: {e}")
 
         # Check type
         if not isinstance(logits, np.ndarray):
             raise LogitsValidationError(
-                f"❌ Logits is not a numpy array: {path}\n"
-                f"Got type: {type(logits)}"
+                f"❌ Logits is not a numpy array: {path}\nGot type: {type(logits)}"
             )
 
         # Check shape
@@ -251,14 +246,12 @@ class LogitsValidator:
         # Check for NaN/inf
         if np.isnan(logits).any():
             raise LogitsValidationError(
-                f"❌ Logits contains NaN values: {path}\n"
-                f"This indicates model prediction failure."
+                f"❌ Logits contains NaN values: {path}\nThis indicates model prediction failure."
             )
 
         if np.isinf(logits).any():
             raise LogitsValidationError(
-                f"❌ Logits contains inf values: {path}\n"
-                f"This indicates numerical instability."
+                f"❌ Logits contains inf values: {path}\nThis indicates numerical instability."
             )
 
         # Check range
@@ -313,8 +306,7 @@ class LabelsValidator:
         # Check existence
         if not path.exists():
             raise LabelsValidationError(
-                f"❌ Labels file not found: {path}\n"
-                f"Expected labels file does not exist."
+                f"❌ Labels file not found: {path}\nExpected labels file does not exist."
             )
 
         # Load based on extension
@@ -329,20 +321,15 @@ class LabelsValidator:
                 labels = np.load(path)
             else:
                 raise LabelsValidationError(
-                    f"❌ Unsupported labels file format: {path.suffix}\n"
-                    f"Supported: .pt, .npy"
+                    f"❌ Unsupported labels file format: {path.suffix}\nSupported: .pt, .npy"
                 )
         except Exception as e:
-            raise LabelsValidationError(
-                f"❌ Failed to load labels: {path}\n"
-                f"Error: {e}"
-            )
+            raise LabelsValidationError(f"❌ Failed to load labels: {path}\nError: {e}")
 
         # Check type
         if not isinstance(labels, np.ndarray):
             raise LabelsValidationError(
-                f"❌ Labels is not a numpy array: {path}\n"
-                f"Got type: {type(labels)}"
+                f"❌ Labels is not a numpy array: {path}\nGot type: {type(labels)}"
             )
 
         # Check shape
@@ -364,16 +351,13 @@ class LabelsValidator:
         # Check dtype (should be integer)
         if not np.issubdtype(labels.dtype, np.integer):
             raise LabelsValidationError(
-                f"❌ Labels has wrong dtype: {path}\n"
-                f"Expected: integer type\n"
-                f"Got: {labels.dtype}"
+                f"❌ Labels has wrong dtype: {path}\nExpected: integer type\nGot: {labels.dtype}"
             )
 
         # Check for negative values
         if (labels < 0).any():
             raise LabelsValidationError(
-                f"❌ Labels contains negative values: {path}\n"
-                f"Labels must be >= 0"
+                f"❌ Labels contains negative values: {path}\nLabels must be >= 0"
             )
 
         # Check class range
@@ -381,7 +365,7 @@ class LabelsValidator:
             if labels.max() >= expected_classes:
                 raise LabelsValidationError(
                     f"❌ Labels out of class range: {path}\n"
-                    f"Expected classes: [0, {expected_classes-1}]\n"
+                    f"Expected classes: [0, {expected_classes - 1}]\n"
                     f"Got max label: {labels.max()}\n"
                     f"This indicates a mismatch between data and model."
                 )
@@ -403,14 +387,14 @@ class PolicyValidator:
 
     VALID_POLICY_TYPES = {
         "threshold",  # Softmax + threshold
-        "gate",       # Learned gate head
-        "scrc",       # SCRC calibration
-        "temperature", # Temperature scaling
+        "gate",  # Learned gate head
+        "scrc",  # SCRC calibration
+        "temperature",  # Temperature scaling
         "dirichlet",  # Dirichlet calibration
-        "beta",       # Beta calibration
-        "platt",      # Platt scaling
-        "isotonic",   # Isotonic regression
-        "ensemble",   # Ensemble of methods
+        "beta",  # Beta calibration
+        "platt",  # Platt scaling
+        "isotonic",  # Isotonic regression
+        "ensemble",  # Ensemble of methods
     }
 
     @staticmethod
@@ -436,8 +420,7 @@ class PolicyValidator:
         # Check existence
         if not path.exists():
             raise PolicyValidationError(
-                f"❌ Policy file not found: {path}\n"
-                f"Expected policy file does not exist."
+                f"❌ Policy file not found: {path}\nExpected policy file does not exist."
             )
 
         # Load JSON
@@ -445,21 +428,14 @@ class PolicyValidator:
             with open(path, "r") as f:
                 policy = json.load(f)
         except json.JSONDecodeError as e:
-            raise PolicyValidationError(
-                f"❌ Invalid JSON in policy file: {path}\n"
-                f"Error: {e}"
-            )
+            raise PolicyValidationError(f"❌ Invalid JSON in policy file: {path}\nError: {e}")
         except Exception as e:
-            raise PolicyValidationError(
-                f"❌ Failed to load policy file: {path}\n"
-                f"Error: {e}"
-            )
+            raise PolicyValidationError(f"❌ Failed to load policy file: {path}\nError: {e}")
 
         # Check type
         if not isinstance(policy, dict):
             raise PolicyValidationError(
-                f"❌ Policy is not a dict: {path}\n"
-                f"Got type: {type(policy)}"
+                f"❌ Policy is not a dict: {path}\nGot type: {type(policy)}"
             )
 
         # Check policy type
@@ -528,8 +504,7 @@ class BundleValidator:
         # Check existence
         if not path.exists():
             raise BundleValidationError(
-                f"❌ Bundle file not found: {path}\n"
-                f"Expected bundle file does not exist."
+                f"❌ Bundle file not found: {path}\nExpected bundle file does not exist."
             )
 
         # Load JSON
@@ -537,21 +512,14 @@ class BundleValidator:
             with open(path, "r") as f:
                 bundle = json.load(f)
         except json.JSONDecodeError as e:
-            raise BundleValidationError(
-                f"❌ Invalid JSON in bundle file: {path}\n"
-                f"Error: {e}"
-            )
+            raise BundleValidationError(f"❌ Invalid JSON in bundle file: {path}\nError: {e}")
         except Exception as e:
-            raise BundleValidationError(
-                f"❌ Failed to load bundle file: {path}\n"
-                f"Error: {e}"
-            )
+            raise BundleValidationError(f"❌ Failed to load bundle file: {path}\nError: {e}")
 
         # Check type
         if not isinstance(bundle, dict):
             raise BundleValidationError(
-                f"❌ Bundle is not a dict: {path}\n"
-                f"Got type: {type(bundle)}"
+                f"❌ Bundle is not a dict: {path}\nGot type: {type(bundle)}"
             )
 
         # Check required fields
@@ -568,14 +536,11 @@ class BundleValidator:
         policy = bundle["policy"]
         if not isinstance(policy, dict):
             raise BundleValidationError(
-                f"❌ Bundle policy is not a dict: {path}\n"
-                f"Got type: {type(policy)}"
+                f"❌ Bundle policy is not a dict: {path}\nGot type: {type(policy)}"
             )
 
         if "policy_type" not in policy:
-            raise BundleValidationError(
-                f"❌ Bundle policy missing 'policy_type': {path}"
-            )
+            raise BundleValidationError(f"❌ Bundle policy missing 'policy_type': {path}")
 
         # Validate policy using PolicyValidator
         # We can't validate the policy file directly, but we can validate the policy dict
@@ -584,6 +549,33 @@ class BundleValidator:
                 f"❌ Bundle has invalid policy type: {path}\n"
                 f"Got: {policy['policy_type']}\n"
                 f"Valid types: {PolicyValidator.VALID_POLICY_TYPES}"
+            )
+
+        # CRITICAL: Enforce EXACTLY ONE policy file exists (mutual exclusivity)
+        # Check parent directory for policy files
+        bundle_dir = path.parent.parent  # outputs/export -> outputs/
+        policy_files = {
+            "thresholds_json": bundle_dir / "phase2" / "thresholds.json",
+            "gateparams_json": bundle_dir / "phase3" / "gateparams.json",
+            "scrcparams_json": bundle_dir / "phase5_scrc" / "scrcparams.json",
+        }
+
+        existing_policies = [name for name, fpath in policy_files.items() if fpath.exists()]
+
+        if len(existing_policies) > 1:
+            raise BundleValidationError(
+                f"❌ BUNDLE MUTUAL EXCLUSIVITY VIOLATION: {path}\n"
+                f"Found {len(existing_policies)} policy files, expected EXACTLY ONE!\n"
+                f"Existing policies: {existing_policies}\n"
+                f"Bundle can only have ONE policy: threshold OR gate OR scrc\n"
+                f"Multiple policies create ambiguous deployment!"
+            )
+
+        if len(existing_policies) == 0:
+            raise BundleValidationError(
+                f"❌ BUNDLE VALIDATION ERROR: {path}\n"
+                f"No policy files found!\n"
+                f"Bundle must have EXACTLY ONE policy (threshold, gate, or scrc)"
             )
 
         return True
@@ -624,9 +616,7 @@ class ArtifactValidator:
 
         if not isinstance(artifacts, ArtifactSchema):
             raise ArtifactValidationError(
-                f"❌ Invalid artifacts type\n"
-                f"Expected: ArtifactSchema\n"
-                f"Got: {type(artifacts)}"
+                f"❌ Invalid artifacts type\nExpected: ArtifactSchema\nGot: {type(artifacts)}"
             )
 
         # Get expected outputs for this phase
@@ -697,9 +687,7 @@ def validate_logits(
     num_classes: Optional[int] = None,
 ) -> bool:
     """Validate logits tensor - convenience wrapper"""
-    return LogitsValidator.validate(
-        path, expected_shape=expected_shape, num_classes=num_classes
-    )
+    return LogitsValidator.validate(path, expected_shape=expected_shape, num_classes=num_classes)
 
 
 def validate_labels(
@@ -719,9 +707,7 @@ def validate_policy(
     required_fields: Optional[Set[str]] = None,
 ) -> bool:
     """Validate policy JSON - convenience wrapper"""
-    return PolicyValidator.validate(
-        path, policy_type=policy_type, required_fields=required_fields
-    )
+    return PolicyValidator.validate(path, policy_type=policy_type, required_fields=required_fields)
 
 
 def validate_bundle(path: Path) -> bool:

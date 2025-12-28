@@ -6,13 +6,13 @@ Benefits:
 - Cannot "forget" to save required artifacts
 - Clear phase input/output contracts
 - Type-safe path construction
-- Automatic directory creation
+- Explicit directory creation via ensure_dirs()
 
 Latest 2025-2026 practices:
-- Python 3.11+ type hints (PEP 695)
-- Pydantic v2 for validation
+- Python 3.11+ type hints
+- Dataclass with slots for memory efficiency
 - Pathlib for type-safe paths
-- Slots for memory efficiency
+- Immutable (frozen=True) where possible
 """
 
 from dataclasses import dataclass, field
@@ -23,6 +23,7 @@ from enum import Enum
 
 class ArtifactType(Enum):
     """All artifact types in the system"""
+
     CHECKPOINT = "checkpoint"
     LOGITS = "logits"
     LABELS = "labels"
@@ -55,19 +56,41 @@ class ArtifactSchema:
     output_dir: Path
 
     def __post_init__(self):
-        """Create output directory if it doesn't exist"""
+        """Convert output_dir to Path (no side-effects)"""
         # Use object.__setattr__ because frozen=True
-        object.__setattr__(self, 'output_dir', Path(self.output_dir))
+        object.__setattr__(self, "output_dir", Path(self.output_dir))
+
+    def ensure_dirs(self) -> None:
+        """
+        Create all required output directories
+
+        Call this ONCE at pipeline initialization, not in properties.
+        This makes directory creation explicit and predictable.
+        """
+        # Create base output directory
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create phase directories
+        self.phase1_dir.mkdir(parents=True, exist_ok=True)
+        self.phase2_dir.mkdir(parents=True, exist_ok=True)
+        self.phase3_dir.mkdir(parents=True, exist_ok=True)
+        self.phase4_dir.mkdir(parents=True, exist_ok=True)
+        self.phase5_dir.mkdir(parents=True, exist_ok=True)
+        self.export_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create auxiliary directories
+        self.calibration_dir.mkdir(parents=True, exist_ok=True)
+        self.evaluation_dir.mkdir(parents=True, exist_ok=True)
+        self.drift_dir.mkdir(parents=True, exist_ok=True)
+        self.tuning_dir.mkdir(parents=True, exist_ok=True)
+        self.mlops_dir.mkdir(parents=True, exist_ok=True)
 
     # ============= PHASE 1: Baseline Training =============
 
     @property
     def phase1_dir(self) -> Path:
         """Phase 1 output directory"""
-        path = self.output_dir / "phase1"
-        path.mkdir(parents=True, exist_ok=True)
-        return path
+        return self.output_dir / "phase1"
 
     @property
     def phase1_checkpoint(self) -> Path:
@@ -118,7 +141,6 @@ class ArtifactSchema:
     def tensorboard_dir(self) -> Path:
         """TensorBoard logs directory"""
         path = self.phase1_dir / "tensorboard"
-        path.mkdir(parents=True, exist_ok=True)
         return path
 
     # ============= PHASE 2: Threshold Sweep =============
@@ -127,7 +149,6 @@ class ArtifactSchema:
     def phase2_dir(self) -> Path:
         """Phase 2 output directory"""
         path = self.output_dir / "phase2"
-        path.mkdir(parents=True, exist_ok=True)
         return path
 
     @property
@@ -146,7 +167,6 @@ class ArtifactSchema:
     def phase3_dir(self) -> Path:
         """Phase 3 output directory"""
         path = self.output_dir / "phase3"
-        path.mkdir(parents=True, exist_ok=True)
         return path
 
     @property
@@ -170,7 +190,6 @@ class ArtifactSchema:
     def phase4_dir(self) -> Path:
         """Phase 4 output directory (ExPLoRA)"""
         path = self.output_dir / "phase4_explora"
-        path.mkdir(parents=True, exist_ok=True)
         return path
 
     @property
@@ -194,7 +213,6 @@ class ArtifactSchema:
     def phase5_dir(self) -> Path:
         """Phase 5 output directory (SCRC)"""
         path = self.output_dir / "phase5_scrc"
-        path.mkdir(parents=True, exist_ok=True)
         return path
 
     @property
@@ -213,7 +231,6 @@ class ArtifactSchema:
     def export_dir(self) -> Path:
         """Export directory"""
         path = self.output_dir / "export"
-        path.mkdir(parents=True, exist_ok=True)
         return path
 
     @property
@@ -235,7 +252,6 @@ class ArtifactSchema:
     def triton_model_dir(self) -> Path:
         """Triton model repository"""
         path = self.export_dir / "triton_models"
-        path.mkdir(parents=True, exist_ok=True)
         return path
 
     # ============= Calibration Outputs =============
@@ -244,7 +260,6 @@ class ArtifactSchema:
     def calibration_dir(self) -> Path:
         """Calibration methods output directory"""
         path = self.output_dir / "calibration"
-        path.mkdir(parents=True, exist_ok=True)
         return path
 
     @property
@@ -288,7 +303,6 @@ class ArtifactSchema:
     def evaluation_dir(self) -> Path:
         """Evaluation output directory"""
         path = self.output_dir / "evaluation"
-        path.mkdir(parents=True, exist_ok=True)
         return path
 
     @property
@@ -339,7 +353,6 @@ class ArtifactSchema:
     def drift_dir(self) -> Path:
         """Drift detection output directory"""
         path = self.output_dir / "drift"
-        path.mkdir(parents=True, exist_ok=True)
         return path
 
     @property
@@ -353,7 +366,6 @@ class ArtifactSchema:
     def tuning_dir(self) -> Path:
         """Hyperparameter tuning output directory"""
         path = self.output_dir / "hyperparameter_tuning"
-        path.mkdir(parents=True, exist_ok=True)
         return path
 
     @property
@@ -372,21 +384,18 @@ class ArtifactSchema:
     def mlops_dir(self) -> Path:
         """MLOps output directory"""
         path = self.output_dir / "mlops"
-        path.mkdir(parents=True, exist_ok=True)
         return path
 
     @property
     def dvc_dir(self) -> Path:
         """DVC cache directory"""
         path = self.mlops_dir / "dvc"
-        path.mkdir(parents=True, exist_ok=True)
         return path
 
     @property
     def mlflow_dir(self) -> Path:
         """MLflow tracking directory"""
         path = self.mlops_dir / "mlflow"
-        path.mkdir(parents=True, exist_ok=True)
         return path
 
     @property
@@ -469,8 +478,7 @@ class ArtifactSchema:
 
         if missing:
             raise FileNotFoundError(
-                f"Phase {phase} missing required inputs: "
-                f"{[str(p) for p in missing]}"
+                f"Phase {phase} missing required inputs: {[str(p) for p in missing]}"
             )
 
         return True
@@ -536,5 +544,6 @@ if __name__ == "__main__":
 
     # Cleanup test outputs
     import shutil
+
     if Path("test_outputs").exists():
         shutil.rmtree("test_outputs")
