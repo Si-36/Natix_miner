@@ -1,0 +1,51 @@
+# DINOv2 ViT-Small Model Configuration
+# Latest 2025-2026 Practices
+#
+# DINOv2 ViT-S/14:
+#   - 22M parameters
+#   - 518x518 input
+#   - Patch size 14
+#   - 384 embedding dim
+#
+# Performance:
+#   - Fast inference (50-70 FPS on H100)
+#   - Good accuracy for most tasks
+#   - Lower memory (fits on 16GB GPU)
+
+# Model architecture
+name: dinov2_vits14
+backbone: dinov2_vits14
+pretrained: true
+freeze_backbone: false  # Finetune all layers
+
+# Architecture details
+architecture:
+  patch_size: 14
+  embed_dim: 384
+  depth: 12
+  num_heads: 6
+  mlp_ratio: 4.0
+
+# Classifier head
+classifier:
+  num_classes: 7  # NATIX has 7 classes
+  hidden_dim: 512
+  dropout: 0.3
+  use_batch_norm: true
+
+# Gate head (for Phase 3)
+gate:
+  enabled: false  # Only enable in Phase 3
+  hidden_dim: 256
+  dropout: 0.2
+  use_batch_norm: true
+
+# Flash Attention 3 (for H100 GPUs)
+flash_attention:
+  enabled: true
+  version: 3  # Flash Attention 3 (1.5-2× faster on H100)
+
+# Model initialization
+init:
+  classifier_init: xavier_uniform
+  gate_init: xavier_uniform

@@ -1,0 +1,81 @@
+# Gate Head Training Configuration (Phase 3)
+# Latest 2025-2026 Practices
+#
+# Train learned gate head for confidence estimation
+# Uses Gatekeeper loss (+2.3% coverage at 95% precision)
+#
+# Expected results:
+#   - Better calibration than softmax
+#   - Coverage: 75-85% at 95% precision
+#   - ECE: 2-3% (vs 3-5% for softmax)
+
+# Training hyperparameters
+epochs: 30  # Shorter than baseline (gate converges fast)
+batch_size: 32
+gradient_accumulation_steps: 1
+
+# Optimizer
+optimizer:
+  name: adamw
+  lr: 5e-5  # Lower LR (only training gate head)
+  betas: [0.9, 0.999]
+  eps: 1e-8
+  weight_decay: 0.01
+
+# Learning rate scheduler
+scheduler:
+  name: cosine
+  warmup_epochs: 2
+  min_lr: 1e-6
+  warmup_start_lr: 1e-6
+
+# Loss function (Gatekeeper loss)
+loss:
+  name: gatekeeper
+  base_loss: cross_entropy
+  label_smoothing: 0.1
+  gate_weight: 1.0  # Weight for gate loss
+
+# Regularization
+regularization:
+  dropout: 0.2  # Lower dropout for gate head
+  mixup_alpha: 0.0  # No MixUp for gate training
+  cutmix_alpha: 0.0  # No CutMix for gate training
+
+# Early stopping
+early_stopping:
+  enabled: true
+  patience: 5  # Shorter patience
+  monitor: val_select/gate_acc
+  mode: max
+  min_delta: 0.001
+
+# Gradient clipping
+gradient_clipping:
+  enabled: true
+  max_norm: 1.0
+
+# Mixed precision training
+mixed_precision:
+  enabled: true
+  dtype: float16
+
+# Logging
+logging:
+  log_every_n_steps: 10
+  val_every_n_epochs: 1
+  save_every_n_epochs: 2
+
+# Gate-specific settings
+gate:
+  enabled: true
+  freeze_backbone: true  # Freeze backbone, only train gate
+  freeze_classifier: true  # Freeze classifier, only train gate
+  hidden_dim: 256
+  dropout: 0.2
+
+# Save gate logits for Phase 5 (SCRC calibration)
+save_logits:
+  enabled: true
+  splits: [val_calib]  # CRITICAL: Only val_calib
+  save_gate_logits: true

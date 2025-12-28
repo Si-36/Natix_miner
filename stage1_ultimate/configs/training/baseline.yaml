@@ -1,0 +1,96 @@
+# Baseline Training Configuration (Phase 1)
+# Latest 2025-2026 Practices
+#
+# Safe hyperparameters:
+#   - lr: 1e-4 (conservative for finetuning)
+#   - dropout: 0.3 (NOT 0.45)
+#   - weight_decay: 0.01 (NOT 0.05)
+#   - label_smoothing: 0.1 (NOT 0.15)
+#
+# Expected results (with ExPLoRA):
+#   - Accuracy: 88-92%
+#   - ECE: 3-5%
+#   - AUROC: 0.94-0.96
+
+# Training hyperparameters
+epochs: 100
+batch_size: 32
+gradient_accumulation_steps: 1
+
+# Optimizer
+optimizer:
+  name: adamw
+  lr: 1e-4
+  betas: [0.9, 0.999]
+  eps: 1e-8
+  weight_decay: 0.01  # Safe weight decay
+
+# Learning rate scheduler
+scheduler:
+  name: cosine
+  warmup_epochs: 5
+  min_lr: 1e-6
+  warmup_start_lr: 1e-6
+
+# Loss function
+loss:
+  name: cross_entropy
+  label_smoothing: 0.1  # Safe label smoothing
+  class_weights: null   # Auto-compute from dataset
+
+# Regularization
+regularization:
+  dropout: 0.3           # Safe dropout
+  mixup_alpha: 0.2       # MixUp augmentation
+  cutmix_alpha: 1.0      # CutMix augmentation
+  stochastic_depth: 0.1  # DropPath rate
+
+# Early stopping
+early_stopping:
+  enabled: true
+  patience: 10
+  monitor: val_select/acc
+  mode: max
+  min_delta: 0.001
+
+# EMA (Exponential Moving Average)
+ema:
+  enabled: true
+  decay: 0.9999
+
+# Gradient clipping
+gradient_clipping:
+  enabled: true
+  max_norm: 1.0
+
+# Mixed precision training
+mixed_precision:
+  enabled: true
+  dtype: float16  # or bfloat16 for H100
+
+# Distributed training (FSDP2)
+distributed:
+  enabled: false  # Enable for multi-GPU
+  backend: nccl
+  strategy: fsdp2  # Fully Sharded Data Parallel v2
+  sharding_strategy: full_shard
+
+# Logging
+logging:
+  log_every_n_steps: 10
+  val_every_n_epochs: 1
+  save_every_n_epochs: 5
+
+# Multi-view inference (Phase 1 specific)
+multiview:
+  enabled: true
+  global_crop: true
+  local_crops: 9  # 3x3 grid
+  top_k_aggregation: 2
+  batch_inference: true
+
+# Save logits for Phase 2 (threshold sweep)
+save_logits:
+  enabled: true
+  splits: [val_calib]  # CRITICAL: Only val_calib for policy fitting
+  save_features: true  # For uncertainty estimation

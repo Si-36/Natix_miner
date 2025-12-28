@@ -1,0 +1,121 @@
+# Main Configuration for StreetVision Training Pipeline
+# Stage 1 Ultimate - Latest 2025-2026 Practices
+#
+# Usage:
+#   python scripts/train_cli.py --phases phase1
+#   python scripts/train_cli.py --phases phase1 model.lr=0.001  # Override
+#
+# Hydra features:
+#   - Type-safe configurations
+#   - Config composition
+#   - Easy overrides from CLI
+#   - Config groups for easy swapping
+
+defaults:
+  - model: dinov2_vits  # Default model (can override with model=dinov2_vitb)
+  - training: baseline  # Default training config
+  - data: natix        # Default dataset
+  - calibration: temperature  # Default calibration method
+  - evaluation: default  # Default evaluation config
+  - _self_  # Include this config last (for overrides)
+
+# Output paths
+output_dir: outputs
+experiment_name: stage1_ultimate
+
+# Pipeline configuration
+pipeline:
+  # Which phases to run
+  phases:
+    - phase1  # Baseline training
+    - phase2  # Threshold sweep
+    - phase6  # Bundle export
+
+  # Auto-save pipeline state
+  save_state: true
+  state_path: ${output_dir}/pipeline_state.json
+
+  # Validation
+  validate_inputs: true
+  validate_outputs: true
+  fail_fast: true  # Stop on first error
+
+# Random seed for reproducibility
+seed: 42
+
+# Logging
+logging:
+  level: INFO
+  use_tensorboard: true
+  use_wandb: false  # Set to true to enable W&B logging
+  wandb:
+    project: streetvision
+    entity: null  # Set to your W&B entity
+    name: ${experiment_name}
+
+# Hardware
+hardware:
+  device: cuda
+  num_gpus: 1
+  num_workers: 8  # DataLoader workers
+  pin_memory: true
+  mixed_precision: true  # Use AMP (Automatic Mixed Precision)
+
+# Data splits (4-way split for zero leakage)
+splits:
+  train_ratio: 0.7
+  val_select_ratio: 0.1  # For model selection (early stopping)
+  val_calib_ratio: 0.1   # For policy fitting (threshold, gate, SCRC)
+  val_test_ratio: 0.1    # For final evaluation ONLY
+
+# Multi-view inference
+multiview:
+  enabled: true
+  global_crop: true      # 1 global crop
+  local_crops: 9         # 3x3 grid of local crops
+  top_k_aggregation: 2   # Take top-K confident predictions
+  batch_inference: true  # Batch all crops together (faster)
+
+# Augmentation
+augmentation:
+  train:
+    resize: 518          # DINOv2 recommended size
+    crop_size: 518
+    horizontal_flip: 0.5
+    color_jitter: 0.4
+    auto_augment: true   # Use AutoAugment
+    mixup_alpha: 0.2
+    cutmix_alpha: 1.0
+
+  val:
+    resize: 518
+    crop_size: 518
+    center_crop: true
+
+# Regularization
+regularization:
+  dropout: 0.3           # Safe dropout (NOT 0.45)
+  weight_decay: 0.01     # Safe weight decay (NOT 0.05)
+  label_smoothing: 0.1   # Safe label smoothing (NOT 0.15)
+  stochastic_depth: 0.1  # DropPath rate
+
+# Early stopping
+early_stopping:
+  enabled: true
+  patience: 10
+  monitor: val_select/acc  # Monitor accuracy on val_select
+  mode: max
+
+# Checkpointing
+checkpointing:
+  save_last: true
+  save_best: true
+  save_ema: true         # Save EMA model
+  ema_decay: 0.9999
+
+# Hydra configuration
+hydra:
+  run:
+    dir: ${output_dir}/${experiment_name}
+  job:
+    chdir: true

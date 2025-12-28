@@ -91,9 +91,80 @@ def main():
     # Set exit policy
     config.exit_policy = args.exit_policy
     
-    # Create trainer (pass phase as argument)
-    device = "cuda" if os.environ.get("CUDA_VISIBLE_DEVICES") else "cuda" if os.path.exists("/dev/nvidia0") else "cpu"
-    trainer = Stage1ProTrainer(config, device=device, phase=args.phase)
+    # Create splits if needed
+    from data.splits import create_val_splits, load_splits, save_splits
+    from data.datasets import NATIXDataset
+    
+    splits_path = Path(args.output_dir if hasattr(args, 'output_dir') else config.output_dir) / "splits.json"
+    if not splits_path.exists():
+        print(f"Creating splits...")
+        # Load val dataset for split creation
+        from data.loaders import create_data_loaders
+        val_dataset = NATIXDataset(
+            image_dir=config.val_image_dir,
+            labels_file=config.val_labels_file,
+            processor=None,  # Will load from backbone
+            augment=False
+        )
+        splits = create_val_splits(
+            val_dataset,
+            val_select_ratio=config.val_select_ratio,
+            val_calib_ratio=config.val_calib_ratio,
+            val_test_ratio=config.val_test_ratio,
+            seed=42
+        )
+        save_splits(splits, str(splits_path))
+    else:
+        print(f"Loading splits from {splits_path}...")
+        splits = load_splits(str(splits_path))
+    
+    # Create dataloaders
+    from data.loaders import create_data_loaders
+    train_dataset = NATIXDataset(
+        image_dir=config.train_image_dir,
+        labels_file=config.train_labels_file,
+        processor=None,  # Will load from backbone
+        augment=True
+    )
+    val_dataset = NATIXDataset(
+        image_dir=config.val_image_dir,
+        labels_file=config.val_labels_file,
+        processor=None,
+        augment=False
+    )
+    train_loader, val_select_loader, val_calib_loader = create_data_loaders(
+        train_dataset,
+        val_dataset,
+        splits,
+        config
+    )
+    
+    # Create backbone
+    from model.backbone import DINOv3Backbone
+    backbone = DINOv3Backbone(config.model_path)
+    backbone.load(freeze=(config.phase == 1))
+    backbone = backbone.to("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Create head based on phase
+    if config.phase == 1:
+        from model.head import Stage1Head
+        head = Stage1Head(num_classes=2, hidden_size=768, phase=config.phase)
+    else:
+        from model.gate_head import GateHead
+        head = GateHead(backbone_dim=768, num_classes=2, gate_hidden_dim=128)
+    head = head.to("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Create trainer with ALL required components
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    trainer = Stage1ProTrainer(
+        model=head,
+        backbone=backbone,
+        train_loader=train_loader,
+        val_select_loader=val_select_loader,
+        val_calib_loader=val_calib_loader,
+        config=config,
+        device=device
+    )
     
     # Route to appropriate mode
     if args.mode == "extract_features":

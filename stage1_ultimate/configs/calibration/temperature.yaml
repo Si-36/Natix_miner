@@ -1,0 +1,46 @@
+# Temperature Scaling Calibration Configuration
+# Latest 2025-2026 Practices
+#
+# Temperature scaling:
+#   - Simple, effective
+#   - -50% ECE reduction
+#   - Single scalar parameter
+#   - Fast to fit (seconds)
+#
+# Usage:
+#   python scripts/train_cli.py --phases phase2 calibration=temperature
+
+# Calibration method
+name: temperature
+method: temperature_scaling
+
+# Optimization
+optimizer:
+  name: lbfgs  # L-BFGS for fast convergence
+  max_iter: 100
+  lr: 0.01
+
+# Validation (on val_calib ONLY)
+validation:
+  metric: ece  # Expected Calibration Error
+  num_bins: 15  # For ECE computation
+
+# Temperature initialization
+init_temperature: 1.0  # Start from T=1 (no scaling)
+
+# Bounds
+temperature_bounds:
+  min: 0.1
+  max: 10.0
+
+# Early stopping
+early_stopping:
+  enabled: true
+  patience: 10
+  min_delta: 0.0001
+
+# Output
+output:
+  save_params: true
+  save_calibrated_logits: true
+  plot_reliability_diagram: true

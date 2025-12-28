@@ -1,0 +1,86 @@
+# Evaluation Configuration
+# Latest 2025-2026 Practices
+#
+# Comprehensive evaluation metrics:
+#   - Classification: Accuracy, Precision, Recall, F1
+#   - Calibration: ECE, MCE, ACE, Brier, NLL
+#   - Ranking: AUROC, AUPRC, AUGRC
+#   - Uncertainty: Confidence intervals, slicing
+#
+# CRITICAL: Final evaluation ONLY on val_test split
+
+# Splits to evaluate
+# CRITICAL: Use val_test ONLY for final evaluation
+splits:
+  - val_test  # FINAL EVALUATION ONLY
+
+# Classification metrics
+classification:
+  accuracy: true
+  precision: true
+  recall: true
+  f1: true
+  confusion_matrix: true
+  per_class_metrics: true
+
+# Calibration metrics
+calibration:
+  ece: true  # Expected Calibration Error
+  mce: true  # Maximum Calibration Error
+  ace: true  # Average Calibration Error
+  brier: true  # Brier Score
+  nll: true  # Negative Log-Likelihood
+
+  # ECE settings
+  ece_bins: 15
+  ece_scheme: equal_width  # or equal_mass
+
+# Ranking metrics
+ranking:
+  auroc: true  # Area Under ROC Curve
+  auprc: true  # Area Under PR Curve
+  augrc: true  # Area Under Generalization-Rejection Curve
+
+# Bootstrap confidence intervals
+bootstrap:
+  enabled: true
+  num_resamples: 1000
+  confidence_level: 0.95
+  metrics:
+    - accuracy
+    - ece
+    - auroc
+
+# Slice-based evaluation
+slicing:
+  enabled: true
+  slices:
+    - name: day
+      filter: time_of_day == "day"
+    - name: night
+      filter: time_of_day == "night"
+    - name: clear_weather
+      filter: weather == "clear"
+    - name: adverse_weather
+      filter: weather in ["rain", "snow", "fog"]
+
+# Visualization
+visualization:
+  reliability_diagram: true
+  calibration_plot: true
+  roc_curve: true
+  pr_curve: true
+  confusion_matrix: true
+
+  # Plot settings
+  plot_style: seaborn
+  figure_size: [10, 8]
+  dpi: 300
+  save_format: png
+
+# Output
+output:
+  save_metrics_json: true
+  save_metrics_csv: true
+  save_predictions: true
+  save_visualizations: true
