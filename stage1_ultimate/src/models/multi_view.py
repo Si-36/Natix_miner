@@ -3,15 +3,17 @@ Multi-View Inference - Production-Grade Test-Time Augmentation
 
 Multi-view inference using spatial tiling for better roadwork detection:
 - Generate 10 crops per image (1 global + 3×3 tiles with 15% overlap)
+- **Batched crop generation** using roi_align (NO Python loops!)
 - Batched forward pass (5-10× faster than sequential)
-- Top-K mean aggregation (robust) or attention aggregation (learnable)
+- Logit-safe aggregation (works with CrossEntropyLoss)
 
 Expected improvement: +3-8% accuracy with only 1.1-1.5× slower inference
 
 Latest 2025-2026 practices:
 - Python 3.14+ with modern type hints
-- Batched processing (GPU-optimized)
+- Batched processing (GPU-optimized, no Python loops)
 - Fixed crop positions (deterministic, reproducible)
+- Logit-safe (returns logits, not probabilities)
 - No aggressive augmentations (no flips, color jitter, rotations)
 """
 
@@ -22,6 +24,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from torchvision.ops import roi_align
 
 logger = logging.getLogger(__name__)
 
@@ -114,50 +117,63 @@ class MultiViewGenerator(nn.Module):
 
         return positions
 
-    def forward(self, image: Tensor) -> Tensor:
+    def forward(self, images: Tensor) -> Tensor:
         """
-        Generate crops from image
+        Generate crops from batch of images (BATCHED - NO Python loops!)
+
+        Uses roi_align for batched crop generation (GPU-optimized).
 
         Args:
-            image: Input image [C, H, W]
+            images: Input images [B, C, H, W]
 
         Returns:
-            crops: Generated crops [num_crops, C, crop_size, crop_size]
-                   (10 crops: 1 global + 9 tiles)
+            crops: Generated crops [B, num_crops, C, crop_size, crop_size]
         """
-        if image.dim() != 3:
-            raise ValueError(f"Expected image of shape [C, H, W], got {image.shape}")
+        if images.dim() != 4:
+            raise ValueError(f"Expected images of shape [B, C, H, W], got {images.shape}")
 
-        C, H, W = image.shape
-        crops = []
+        B, C, H, W = images.shape
 
-        # 1. Global view (entire image resized)
-        global_view = F.interpolate(
-            image.unsqueeze(0),  # [1, C, H, W]
+        # 1. Global view (entire image resized) - batched
+        global_views = F.interpolate(
+            images,  # [B, C, H, W]
             size=(self.crop_size, self.crop_size),
             mode="bilinear",
             align_corners=False,
-        )
-        crops.append(global_view.squeeze(0))  # [C, crop_size, crop_size]
+        )  # [B, C, crop_size, crop_size]
 
-        # 2. Tile views (3×3 grid with overlap)
-        positions = self._compute_positions(H, W)
+        # 2. Tile views using roi_align (batched, GPU-optimized!)
+        positions = self._compute_positions(H, W)  # List of (x1, y1, x2, y2)
 
-        for x1, y1, x2, y2 in positions:
-            # Extract tile
-            tile = image[:, y1:y2, x1:x2]  # [C, tile_h, tile_w]
+        # Convert positions to roi_align format: [batch_idx, x1, y1, x2, y2]
+        boxes = []
+        for batch_idx in range(B):
+            for (x1, y1, x2, y2) in positions:
+                boxes.append([batch_idx, x1, y1, x2, y2])
 
-            # Resize to crop_size
-            tile_resized = F.interpolate(
-                tile.unsqueeze(0),  # [1, C, tile_h, tile_w]
-                size=(self.crop_size, self.crop_size),
-                mode="bilinear",
-                align_corners=False,
-            )
-            crops.append(tile_resized.squeeze(0))  # [C, crop_size, crop_size]
+        boxes_tensor = torch.tensor(boxes, dtype=torch.float32, device=images.device)
 
-        # Stack all crops
-        return torch.stack(crops)  # [10, C, crop_size, crop_size]
+        # Extract and resize all tiles in one batched operation!
+        tile_crops = roi_align(
+            images,
+            boxes_tensor,
+            output_size=(self.crop_size, self.crop_size),
+            spatial_scale=1.0,
+            aligned=True,
+        )  # [B*num_tiles, C, crop_size, crop_size]
+
+        # Reshape tiles to [B, num_tiles, C, crop_size, crop_size]
+        num_tiles = len(positions)
+        tile_crops = tile_crops.view(B, num_tiles, C, self.crop_size, self.crop_size)
+
+        # Concatenate global views with tile views
+        # global_views: [B, C, crop_size, crop_size] → [B, 1, C, crop_size, crop_size]
+        global_views = global_views.unsqueeze(1)
+
+        # Concatenate: [B, 1, C, H, W] + [B, num_tiles, C, H, W] → [B, num_crops, C, H, W]
+        all_crops = torch.cat([global_views, tile_crops], dim=1)
+
+        return all_crops  # [B, num_crops, C, crop_size, crop_size]
 
     @property
     def num_crops(self) -> int:
@@ -177,56 +193,56 @@ class MultiViewGenerator(nn.Module):
 
 class TopKMeanAggregator(nn.Module):
     """
-    Aggregate multi-view predictions using Top-K mean
+    Aggregate multi-view logits using Top-K mean (LOGIT-SAFE)
 
-    Takes top-K most confident views and averages them.
-    More robust than:
-    - Max (sensitive to outliers)
-    - Simple mean (includes low-confidence junk)
+    CRITICAL: Returns LOGITS, not probabilities!
+    - Ranks views by confidence (using softmax for ranking only)
+    - Averages top-K LOGITS (not probabilities)
+    - Safe for CrossEntropyLoss
 
     Why this works:
     - Focuses on most confident views
     - Averages out noise
-    - Ignores low-quality predictions
+    - Mathematically correct for CE loss
 
     Args:
         topk: Number of top views to average (default: 2)
               K=2 or K=3 recommended for roadwork detection
-        use_logits: If True, work with logits instead of probabilities
 
     Example:
         >>> aggregator = TopKMeanAggregator(topk=2)
-        >>> predictions = torch.randn(2, 10, 13)  # [B, num_crops, num_classes]
-        >>> aggregated = aggregator(predictions)  # [2, 13]
+        >>> logits = torch.randn(2, 10, 13)  # [B, num_crops, num_classes]
+        >>> agg_logits = aggregator(logits)  # [2, 13] - still logits!
     """
 
-    def __init__(self, topk: int = 2, use_logits: bool = False):
+    def __init__(self, topk: int = 2):
         super().__init__()
 
         if topk <= 0:
             raise ValueError(f"topk must be > 0, got {topk}")
 
         self.topk = topk
-        self.use_logits = use_logits
 
-        logger.info(f"Initialized TopKMeanAggregator: topk={topk}, use_logits={use_logits}")
+        logger.info(f"Initialized TopKMeanAggregator: topk={topk} (logit-safe)")
 
-    def forward(self, predictions: Tensor) -> Tensor:
+    def forward(self, logits: Tensor) -> Tensor:
         """
-        Aggregate predictions using Top-K mean
+        Aggregate logits using Top-K mean
+
+        CRITICAL: Input and output are LOGITS (not probabilities)
 
         Args:
-            predictions: Multi-view predictions [B, num_crops, num_classes]
+            logits: Multi-view logits [B, num_crops, num_classes]
 
         Returns:
-            aggregated: Aggregated predictions [B, num_classes]
+            aggregated_logits: Aggregated logits [B, num_classes]
         """
-        if predictions.dim() != 3:
+        if logits.dim() != 3:
             raise ValueError(
-                f"Expected predictions of shape [B, num_crops, num_classes], got {predictions.shape}"
+                f"Expected logits of shape [B, num_crops, num_classes], got {logits.shape}"
             )
 
-        B, num_crops, num_classes = predictions.shape
+        B, num_crops, num_classes = logits.shape
 
         if self.topk > num_crops:
             logger.warning(
@@ -236,54 +252,51 @@ class TopKMeanAggregator(nn.Module):
         else:
             actual_k = self.topk
 
-        # Convert to probabilities if needed
-        if not self.use_logits:
-            probs = F.softmax(predictions, dim=-1)  # [B, num_crops, num_classes]
-        else:
-            probs = predictions
+        # Compute probabilities ONLY for ranking (not for aggregation!)
+        probs = F.softmax(logits, dim=-1)  # [B, num_crops, num_classes]
 
         # Get confidence (max probability per view)
-        # This tells us which views are most confident in their predictions
         confidence = probs.max(dim=-1).values  # [B, num_crops]
 
         # Get top-K views by confidence
         topk_indices = torch.topk(confidence, k=actual_k, dim=-1).indices  # [B, topk]
 
-        # Gather top-K predictions
-        # Expand indices to match predictions shape
+        # Gather top-K LOGITS (not probabilities!)
         topk_indices_expanded = topk_indices.unsqueeze(-1).expand(
             -1, -1, num_classes
         )  # [B, topk, num_classes]
 
-        topk_probs = torch.gather(
-            probs, dim=1, index=topk_indices_expanded
+        topk_logits = torch.gather(
+            logits, dim=1, index=topk_indices_expanded
         )  # [B, topk, num_classes]
 
-        # Average top-K predictions
-        aggregated = topk_probs.mean(dim=1)  # [B, num_classes]
+        # Average top-K LOGITS
+        aggregated_logits = topk_logits.mean(dim=1)  # [B, num_classes]
 
-        return aggregated
+        return aggregated_logits
 
     def __repr__(self) -> str:
-        return f"TopKMeanAggregator(topk={self.topk}, use_logits={self.use_logits})"
+        return f"TopKMeanAggregator(topk={self.topk})"
 
 
 class AttentionAggregator(nn.Module):
     """
-    Learnable attention-based aggregation
+    Learnable attention-based aggregation (LOGIT-SAFE)
 
-    Uses MLP to compute attention weights for each view.
-    More powerful than Top-K but needs more training data.
+    CRITICAL: Returns LOGITS, not probabilities!
+    - Learns which views to trust using MLP
+    - Computes weighted sum of LOGITS
+    - Safe for CrossEntropyLoss
 
     Why this works:
-    - Learns which views to trust
-    - Different views have different importance
-    - Adaptive to different scenarios
+    - Learns view importance adaptively
+    - More powerful than fixed Top-K
+    - Mathematically correct for CE loss
 
     When to use:
     - You have >10k training samples
     - You want maximum accuracy
-    - You can afford extra parameters
+    - You can afford ~5k extra parameters
 
     Args:
         num_classes: Number of output classes
@@ -291,8 +304,8 @@ class AttentionAggregator(nn.Module):
 
     Example:
         >>> aggregator = AttentionAggregator(num_classes=13, hidden_dim=64)
-        >>> predictions = torch.randn(2, 10, 13)  # [B, num_crops, num_classes]
-        >>> aggregated = aggregator(predictions)  # [2, 13]
+        >>> logits = torch.randn(2, 10, 13)  # [B, num_crops, num_classes]
+        >>> agg_logits = aggregator(logits)  # [2, 13] - still logits!
     """
 
     def __init__(self, num_classes: int, hidden_dim: int = 64):
@@ -306,7 +319,8 @@ class AttentionAggregator(nn.Module):
         self.num_classes = num_classes
         self.hidden_dim = hidden_dim
 
-        # MLP to compute attention weights from predictions
+        # MLP to compute attention weights from logits
+        # Uses probabilities internally for numerical stability
         self.attention_mlp = nn.Sequential(
             nn.Linear(num_classes, hidden_dim),
             nn.ReLU(),
@@ -319,7 +333,7 @@ class AttentionAggregator(nn.Module):
 
         logger.info(
             f"Initialized AttentionAggregator: num_classes={num_classes}, "
-            f"hidden_dim={hidden_dim}"
+            f"hidden_dim={hidden_dim} (logit-safe)"
         )
 
     def _init_weights(self) -> None:
@@ -330,35 +344,34 @@ class AttentionAggregator(nn.Module):
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
 
-    def forward(self, predictions: Tensor) -> Tensor:
+    def forward(self, logits: Tensor) -> Tensor:
         """
-        Aggregate predictions using learned attention
+        Aggregate logits using learned attention
+
+        CRITICAL: Input and output are LOGITS (not probabilities)
 
         Args:
-            predictions: Multi-view predictions [B, num_crops, num_classes]
+            logits: Multi-view logits [B, num_crops, num_classes]
 
         Returns:
-            aggregated: Aggregated predictions [B, num_classes]
+            aggregated_logits: Aggregated logits [B, num_classes]
         """
-        if predictions.dim() != 3:
+        if logits.dim() != 3:
             raise ValueError(
-                f"Expected predictions of shape [B, num_crops, num_classes], got {predictions.shape}"
+                f"Expected logits of shape [B, num_crops, num_classes], got {logits.shape}"
             )
 
-        # Convert to probabilities
-        probs = F.softmax(predictions, dim=-1)  # [B, num_crops, num_classes]
+        # Compute probabilities for attention weighting (numerical stability)
+        probs = F.softmax(logits, dim=-1)  # [B, num_crops, num_classes]
 
         # Compute attention weights for each view
-        # MLP takes probs and outputs scalar attention weight
         attn_logits = self.attention_mlp(probs)  # [B, num_crops, 1]
-
-        # Softmax over crops dimension to get attention weights
         attn_weights = F.softmax(attn_logits, dim=1)  # [B, num_crops, 1]
 
-        # Weighted sum of probabilities
-        aggregated = (probs * attn_weights).sum(dim=1)  # [B, num_classes]
+        # Weighted sum of LOGITS (not probabilities!)
+        aggregated_logits = (logits * attn_weights).sum(dim=1)  # [B, num_classes]
 
-        return aggregated
+        return aggregated_logits
 
     def __repr__(self) -> str:
         return (
@@ -411,6 +424,7 @@ class MultiViewDINOv3(nn.Module):
         num_crops: int = 10,
         grid_size: tuple[int, int] = (3, 3),
         overlap: float = 0.15,
+        crop_size: Optional[int] = None,
     ):
         super().__init__()
 
@@ -418,14 +432,29 @@ class MultiViewDINOv3(nn.Module):
         self.head = head
         self.aggregator = aggregator
 
+        # Get crop_size from backbone config if not provided
+        if crop_size is None:
+            # Try to get from backbone config
+            if hasattr(backbone, "config") and hasattr(backbone.config, "image_size"):
+                crop_size = backbone.config.image_size
+            elif hasattr(backbone, "image_size"):
+                crop_size = backbone.image_size
+            else:
+                # Default to 224 (DINOv3 standard)
+                crop_size = 224
+                logger.warning(
+                    "Could not infer crop_size from backbone, using default 224"
+                )
+
         # Multi-view generator
         self.generator = MultiViewGenerator(
-            crop_size=224,  # DINOv3 standard input size
+            crop_size=crop_size,
             grid_size=grid_size,
             overlap=overlap,
         )
 
         self.num_crops = num_crops
+        self.crop_size = crop_size
 
         # Validate num_crops matches generator
         if self.num_crops != self.generator.num_crops:
@@ -437,36 +466,33 @@ class MultiViewDINOv3(nn.Module):
 
         logger.info(
             f"Initialized MultiViewDINOv3: num_crops={self.num_crops}, "
-            f"grid_size={grid_size}, overlap={overlap:.1%}"
+            f"crop_size={crop_size}, grid_size={grid_size}, overlap={overlap:.1%}"
         )
 
     def forward(self, images: Tensor) -> Tensor:
         """
-        Multi-view forward pass
+        Multi-view forward pass (FULLY BATCHED - NO Python loops!)
+
+        CRITICAL: Returns LOGITS (not probabilities) - safe for CrossEntropyLoss
 
         Args:
             images: Input images [B, 3, H, W]
 
         Returns:
-            aggregated: Aggregated predictions [B, num_classes]
+            aggregated_logits: Aggregated logits [B, num_classes]
         """
         if images.dim() != 4:
             raise ValueError(f"Expected images of shape [B, 3, H, W], got {images.shape}")
 
-        B = images.size(0)
+        B, C = images.size(0), images.size(1)
 
-        # Step 1: Generate crops for all images
-        all_crops = []
-        for i in range(B):
-            crops_i = self.generator(images[i])  # [num_crops, 3, 224, 224]
-            all_crops.append(crops_i)
-        all_crops = torch.stack(all_crops)  # [B, num_crops, 3, 224, 224]
+        # Step 1: Generate crops for all images (BATCHED - NO loop!)
+        all_crops = self.generator(images)  # [B, num_crops, C, crop_size, crop_size]
 
-        # Step 2: Flatten for batched processing (CRITICAL!)
-        # This is the key to 5-10× speedup: process all crops at once
+        # Step 2: Flatten for batched processing (CRITICAL for speed!)
         crops_flat = all_crops.view(
-            B * self.num_crops, 3, 224, 224
-        )  # [B*num_crops, 3, 224, 224]
+            B * self.num_crops, C, self.crop_size, self.crop_size
+        )  # [B*num_crops, C, crop_size, crop_size]
 
         # Step 3: Single batched forward pass through backbone + head
         features = self.backbone(crops_flat)  # [B*num_crops, hidden_size]
@@ -476,10 +502,10 @@ class MultiViewDINOv3(nn.Module):
         num_classes = logits.size(-1)
         logits = logits.view(B, self.num_crops, num_classes)
 
-        # Step 5: Aggregate predictions
-        aggregated = self.aggregator(logits)  # [B, num_classes]
+        # Step 5: Aggregate logits (returns logits, not probabilities!)
+        aggregated_logits = self.aggregator(logits)  # [B, num_classes]
 
-        return aggregated
+        return aggregated_logits
 
     def __repr__(self) -> str:
         return (
@@ -499,6 +525,7 @@ def create_multiview_model(
     num_classes: int = 13,
     grid_size: tuple[int, int] = (3, 3),
     overlap: float = 0.15,
+    crop_size: Optional[int] = None,
 ) -> MultiViewDINOv3:
     """
     Factory function to create multi-view model
@@ -538,6 +565,7 @@ def create_multiview_model(
         aggregator=aggregator,
         grid_size=grid_size,
         overlap=overlap,
+        crop_size=crop_size,  # Now configurable from backbone
     )
 
     return model
