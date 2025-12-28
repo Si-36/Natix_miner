@@ -1,6 +1,6 @@
 """
 🔥 **PyTorch Lightning 2.4 Module (2025 Best Practices)**
-COMPLETE FIX - All syntax errors removed, deprecated parameters removed
+Complete LightningModule with torch.compile, FSDP2, multiple val loaders
 """
 
 import torch
@@ -9,10 +9,8 @@ from typing import Dict, Optional, Any, List, Tuple
 import numpy as np
 
 import lightning as L
-from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
+from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.utilities import rank_zero_debug
-
-from ..configs.artifacts import ArtifactPaths
 
 
 class RoadworkLightningModule(L.LightningModule):
@@ -98,9 +96,27 @@ class RoadworkLightningModule(L.LightningModule):
                 betas=(0.9, 0.999),
                 eps=1e-8,
                 amsgrad=False,
+                fused=True,  # 2025: Faster implementation
             )
         else:
             optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate)
+        
+        # Scheduler
+        if self.scheduler_name == "cosine":
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=self.trainer.max_epochs if hasattr(self.trainer, 'max_epochs') else 50,
+                eta_min=self.scheduler_min_lr,
+            )
+        elif self.scheduler_name == "onecycle":
+            scheduler = torch.optim.lr_scheduler.OneCycleLR(
+                optimizer,
+                max_lr=self.learning_rate,
+                total_steps=self.trainer.estimated_stepping_batches if hasattr(self.trainer, 'estimated_stepping_batches') else 10000,
+                pct_start=self.warmup_epochs / 50,
+            )
+        else:
+            scheduler = None
         
         return optimizer
     
@@ -119,9 +135,6 @@ class RoadworkLightningModule(L.LightningModule):
                 save_last=True,
             )
         )
-        
-        # Learning rate monitor
-        callbacks.append(LearningRateMonitor(logging_interval="step"))
         
         return callbacks
     
@@ -208,24 +221,33 @@ class RoadworkLightningModule(L.LightningModule):
             "val_calib/accuracy": acc,
         }
     
+    def validation_step(self, batch, batch_idx, dataloader_idx=2):
+        """Validation step for val_test (final evaluation)"""
+        images, labels = batch
+        logits = self(images)
+        
+        # Compute metrics
+        preds = torch.argmax(logits, dim=1)
+        acc = self.val_accuracy(preds, labels)
+        auroc = self.val_auroc(logits, labels)
+        
+        # Store for final evaluation
+        probs = torch.softmax(logits, dim=1)
+        self.val_test_logits.append(probs.detach().cpu())
+        self.val_test_labels.append(labels.detach().cpu())
+        
+        # Log metrics
+        self.log("val_test/loss", self.criterion(logits, labels), prog_bar=False, sync_dist=True)
+        self.log("val_test/accuracy", acc, prog_bar=False, sync_dist=True, batch_size=images.size(0))
+        self.log("val_test/auroc", auroc, prog_bar=False, sync_dist=True, batch_size=images.size(0))
+        
+        return {
+            "val_test/accuracy": acc,
+            "val_test/auroc": auroc,
+        }
+    
     def on_validation_epoch_end(self):
         """Called at end of validation epoch"""
-        # Save validation data for calibration
-        import torch
-        if len(self.val_select_logits) > 0:
-            val_select_logits = torch.cat(self.val_select_logits, dim=0)
-            val_select_labels = torch.cat(self.val_select_labels, dim=0)
-            torch.save(val_select_logits, "outputs/val_select_logits.pt")
-            torch.save(val_select_labels, "outputs/val_select_labels.pt")
-            rank_zero_debug("Saved val_select logits for calibration")
-        
-        if len(self.val_calib_logits) > 0:
-            val_calib_logits = torch.cat(self.val_calib_logits, dim=0)
-            val_calib_labels = torch.cat(self.val_calib_labels, dim=0)
-            torch.save(val_calib_logits, "outputs/val_calib_logits.pt")
-            torch.save(val_calib_labels, "outputs/val_calib_labels.pt")
-            rank_zero_debug("Saved val_calib logits for calibration")
-        
         # Clear stored data
         self.val_select_logits.clear()
         self.val_select_labels.clear()
@@ -252,3 +274,28 @@ class RoadworkLightningModule(L.LightningModule):
     def on_fit_end(self):
         """Called at end of training"""
         rank_zero_debug("Training complete!")
+        
+        # Save validation logits for calibration
+        if len(self.val_select_logits) > 0:
+            import torch
+            val_select_logits = torch.cat(self.val_select_logits, dim=0)
+            val_select_labels = torch.cat(self.val_select_labels, dim=0)
+            torch.save(val_select_logits, "outputs/val_select_logits.pt")
+            torch.save(val_select_labels, "outputs/val_select_labels.pt")
+            rank_zero_debug("Saved val_select logits for calibration")
+        
+        if len(self.val_calib_logits) > 0:
+            import torch
+            val_calib_logits = torch.cat(self.val_calib_logits, dim=0)
+            val_calib_labels = torch.cat(self.val_calib_labels, dim=0)
+            torch.save(val_calib_logits, "outputs/val_calib_logits.pt")
+            torch.save(val_calib_labels, "outputs/val_calib_labels.pt")
+            rank_zero_debug("Saved val_calib logits for calibration")
+        
+        if len(self.val_test_logits) > 0:
+            import torch
+            val_test_logits = torch.cat(self.val_test_logits, dim=0)
+            val_test_labels = torch.cat(self.val_test_labels, dim=0)
+            torch.save(val_test_logits, "outputs/val_test_logits.pt")
+            torch.save(val_test_labels, "outputs/val_test_labels.pt")
+            rank_zero_debug("Saved val_test logits for evaluation")
