@@ -10,6 +10,8 @@ from models.multi_view import (
     MultiViewDINOv3,
     create_multiview_model,
 )
+from models.explora_config import ExPLoRAConfig, EXPLORA_PRESETS
+from models.explora_module import ExPLoRAModule
 
 __all__ = [
     # Backbone
@@ -28,4 +30,8 @@ __all__ = [
     "AttentionAggregator",
     "MultiViewDINOv3",
     "create_multiview_model",
+    # ExPLoRA
+    "ExPLoRAConfig",
+    "EXPLORA_PRESETS",
+    "ExPLoRAModule",
 ]

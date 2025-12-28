@@ -1,0 +1,119 @@
+# Phase 4: ExPLoRA (Extended Pretraining with LoRA)
+# Latest 2025-2026 Practices
+#
+# What is ExPLoRA?
+#   Extended Pretraining with LoRA adapters for domain adaptation.
+#   Adapts general vision model (DINOv3) to roadwork detection domain.
+#
+# Why ExPLoRA?
+#   - Only trains 0.1% of parameters (LoRA adapters, not full model)
+#   - Domain adaptation: General vision → Roadwork detection
+#   - Merge adapters after training = zero inference overhead
+#   - Expected gain: +8.2% accuracy (69% → 77.2%)
+#
+# How it works:
+#   1. Load frozen DINOv3 backbone
+#   2. Inject LoRA adapters (trainable)
+#   3. Train on roadwork images (extended pretraining)
+#   4. Merge adapters back to backbone
+#   5. Save merged checkpoint for Phase 1 fine-tuning
+#
+# Hardware requirements:
+#   - 4 GPUs (A100 40GB recommended)
+#   - ~24 hours training time
+#   - ~160GB total VRAM (40GB per GPU)
+#
+# Use this config to run Phase 4 ExPLoRA training.
+
+# DINOv3 backbone
+backbone:
+  model_id: facebook/dinov2-giant  # DINOv2 Giant (ViT-g/14, 1280 hidden_size)
+  freeze: true  # Freeze backbone (only LoRA adapters are trainable)
+  torch_dtype: bfloat16  # Use bfloat16 for memory efficiency
+
+# LoRA adapter configuration
+lora:
+  rank: 16  # LoRA rank (r). Higher = more capacity. 16 is optimal for ViT-g.
+  alpha: 32  # LoRA scaling factor (2× rank is standard)
+  dropout: 0.05  # Dropout for LoRA layers (0.05 for extended pretraining)
+  target_modules:  # Attention modules to adapt
+    - q_proj  # Query projection
+    - v_proj  # Value projection
+    - k_proj  # Key projection
+  bias: none  # Don't adapt bias terms
+  task_type: FEATURE_EXTRACTION  # Extended pretraining (not classification)
+  init_lora_weights: gaussian  # Gaussian initialization (stable for ViT)
+  use_rslora: true  # Rank-Stabilized LoRA (2024 improvement)
+  use_dora: false  # DoRA (not needed for ExPLoRA)
+
+# Classification head (for extended pretraining only)
+head:
+  num_classes: 13  # NATIX has 13 roadwork classes
+  hidden_size: 1280  # DINOv2 Giant hidden size
+
+# Training hyperparameters
+training:
+  learning_rate: 1.0e-4  # Peak learning rate
+  weight_decay: 0.01  # AdamW weight decay
+  warmup_epochs: 2  # Linear warmup epochs
+  max_epochs: 100  # Total training epochs (extended pretraining)
+  batch_size: 16  # Per-GPU batch size (total: 64 with 4 GPUs)
+  num_workers: 4  # DataLoader workers per GPU
+  gradient_clip_val: 1.0  # Gradient clipping for stability
+
+# Optimization features
+optimization:
+  use_gradient_checkpointing: true  # Save memory (enables larger batch size)
+  precision: bf16-mixed  # bfloat16 mixed precision (faster, same accuracy)
+
+# Distributed training
+distributed:
+  strategy: ddp  # Distributed Data Parallel
+  num_gpus: 4  # 4 GPUs for training
+  find_unused_parameters: false  # DDP optimization
+
+# Early stopping
+early_stopping:
+  monitor: val/loss
+  mode: min
+  patience: 15  # More patience for long training
+  verbose: true
+
+# Checkpointing
+checkpointing:
+  monitor: val/loss
+  mode: min
+  save_top_k: 1  # Save best checkpoint only
+  save_last: true  # Also save last checkpoint
+
+# Logging
+logging:
+  log_every_n_steps: 10
+  deterministic: true  # Reproducible results
+
+# Data splits (ExPLoRA uses TRAIN + VAL_SELECT only)
+data:
+  use_val_calib: false  # ExPLoRA doesn't need val_calib
+
+# Output artifacts
+outputs:
+  merged_checkpoint: explora_backbone.pth  # Merged backbone (2.5GB)
+  lora_checkpoint: explora_lora.pth  # LoRA adapters only (50MB)
+  metrics_json: metrics.json  # Training metrics
+
+# Expected results:
+#   - Training time: ~24 hours on 4× A100 40GB
+#   - Accuracy improvement: +8.2% (69% → 77.2%)
+#   - Trainable parameters: ~2M (0.1% of total)
+#   - Final checkpoint: Standard DINOv3 (no PEFT, zero inference overhead)
+#
+# After ExPLoRA:
+#   - Use explora_backbone.pth as pretrained_path in Phase 1
+#   - Phase 1 will fine-tune full model (not just adapters)
+#   - Expected final accuracy: ~85% (ExPLoRA + Phase 1 + Multi-view)
+#
+# CRITICAL NOTES:
+#   - ExPLoRA is Phase 4 (optional, independent)
+#   - Phase 1 can run with or without ExPLoRA checkpoint
+#   - If skipping ExPLoRA, Phase 1 uses standard DINOv3 pretrained weights
+#   - ExPLoRA → Phase 1 → Multi-view = Maximum accuracy (+16% total)

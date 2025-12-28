@@ -190,8 +190,169 @@ def register_phase_executors(engine: DAGEngine) -> None:
         raise NotImplementedError("TODO: Implement Phase 3 gate training")
 
     def phase4_executor(artifacts):
-        logger.warning("Phase 4 executor not implemented yet")
-        raise NotImplementedError("TODO 141-160: Implement ExPLoRA")
+        """
+        Phase 4: ExPLoRA (Extended Pretraining with LoRA)
+
+        Domain adaptation: Fine-tune DINOv3 with LoRA adapters on roadwork images.
+        Expected gain: +8.2% accuracy (69% → 77.2%)
+
+        Saves:
+        - Merged backbone checkpoint (explora_backbone.pth)
+        - LoRA adapter weights (explora_lora.pth)
+        - Metrics JSON (metrics.json)
+        """
+        import json
+        import numpy as np
+        import torch
+        import lightning as L
+        from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
+        from transformers import AutoModel
+        from data import NATIXDataModule
+        from models.explora_module import ExPLoRAModule
+        from models.explora_config import ExPLoRAConfig
+
+        logger.info("=" * 80)
+        logger.info("PHASE 4: ExPLoRA (Extended Pretraining with LoRA)")
+        logger.info("=" * 80)
+
+        # Configuration (TODO: Get from Hydra config)
+        DATA_ROOT = "/data/natix"  # Update to your data path
+        DINOV3_MODEL = "facebook/dinov2-giant"  # DINOv2 Giant (ViT-g/14)
+        BATCH_SIZE = 16  # Smaller batch for 4 GPUs (total effective: 64)
+        MAX_EPOCHS = 100  # Extended pretraining
+        NUM_WORKERS = 4
+        NUM_GPUS = 4  # 4 GPUs for distributed training
+        LORA_RANK = 16
+        LORA_ALPHA = 32
+
+        logger.info(f"Data root: {DATA_ROOT}")
+        logger.info(f"DINOv3 model: {DINOV3_MODEL}")
+        logger.info(f"LoRA rank: {LORA_RANK}, alpha: {LORA_ALPHA}")
+        logger.info(f"Training on {NUM_GPUS} GPUs for {MAX_EPOCHS} epochs")
+
+        # Load frozen DINOv3 backbone
+        logger.info("Loading DINOv3 backbone...")
+        backbone = AutoModel.from_pretrained(
+            DINOV3_MODEL,
+            torch_dtype=torch.bfloat16,  # Use bfloat16 for memory efficiency
+        )
+        backbone.requires_grad_(False)  # Freeze completely
+
+        # Create LoRA configuration
+        lora_config = ExPLoRAConfig(
+            rank=LORA_RANK,
+            alpha=LORA_ALPHA,
+            dropout=0.05,
+            target_modules=["q_proj", "v_proj", "k_proj"],
+            use_rslora=True,  # Rank-Stabilized LoRA
+        )
+
+        # Create ExPLoRA module
+        model = ExPLoRAModule(
+            backbone=backbone,
+            num_classes=13,
+            lora_config=lora_config,
+            learning_rate=1e-4,
+            weight_decay=0.01,
+            warmup_epochs=2,
+            max_epochs=MAX_EPOCHS,
+            use_gradient_checkpointing=True,
+        )
+
+        # Print trainable parameters
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        logger.info(
+            f"Model parameters:\n"
+            f"  Total:     {total_params:,}\n"
+            f"  Trainable: {trainable_params:,} ({100.0 * trainable_params / total_params:.2f}%)"
+        )
+
+        # Create datamodule
+        datamodule = NATIXDataModule(
+            data_root=DATA_ROOT,
+            splits_json=str(artifacts.splits_json),
+            batch_size=BATCH_SIZE,
+            num_workers=NUM_WORKERS,
+            # ExPLoRA only uses TRAIN + VAL_SELECT (no val_calib)
+            use_val_calib=False,
+        )
+
+        # Callbacks
+        callbacks = [
+            ModelCheckpoint(
+                dirpath=str(artifacts.phase4_dir),
+                filename="best_model",
+                monitor="val/loss",
+                mode="min",
+                save_top_k=1,
+                save_last=True,
+            ),
+            EarlyStopping(
+                monitor="val/loss",
+                mode="min",
+                patience=15,  # More patience for long training
+                verbose=True,
+            ),
+            LearningRateMonitor(logging_interval="epoch"),
+        ]
+
+        # Trainer (4 GPUs, DDP strategy)
+        trainer = L.Trainer(
+            max_epochs=MAX_EPOCHS,
+            accelerator="gpu",
+            devices=NUM_GPUS,
+            strategy="ddp",  # Distributed Data Parallel
+            precision="bf16-mixed",  # bfloat16 mixed precision
+            callbacks=callbacks,
+            default_root_dir=str(artifacts.phase4_dir),
+            log_every_n_steps=10,
+            deterministic=True,
+            gradient_clip_val=1.0,  # Gradient clipping for stability
+        )
+
+        # Train
+        logger.info("Starting ExPLoRA training...")
+        logger.info(f"Expected time: ~24 hours on 4× A100 GPUs")
+        trainer.fit(model, datamodule=datamodule)
+
+        # Merge LoRA adapters and save (only on rank 0)
+        if trainer.global_rank == 0:
+            logger.info("Merging LoRA adapters and saving checkpoints...")
+
+            # Load best checkpoint
+            best_ckpt_path = callbacks[0].best_model_path
+            logger.info(f"Loading best checkpoint: {best_ckpt_path}")
+            checkpoint = torch.load(best_ckpt_path, map_location="cpu")
+            model.load_state_dict(checkpoint["state_dict"])
+
+            # Merge and save
+            model.merge_and_save(
+                output_path=artifacts.explora_checkpoint,
+                save_lora_separately=True,
+                lora_path=artifacts.explora_lora_checkpoint,
+            )
+
+            # Save metrics
+            metrics = model.get_metrics_summary()
+            metrics["config"] = {
+                "backbone": DINOV3_MODEL,
+                "lora_rank": LORA_RANK,
+                "lora_alpha": LORA_ALPHA,
+                "batch_size": BATCH_SIZE,
+                "max_epochs": MAX_EPOCHS,
+                "num_gpus": NUM_GPUS,
+                "best_checkpoint": str(best_ckpt_path),
+            }
+
+            with open(artifacts.explora_metrics_json, "w") as f:
+                json.dump(metrics, f, indent=2)
+
+            logger.info(f"✅ Phase 4 complete!")
+            logger.info(f"Merged backbone: {artifacts.explora_checkpoint}")
+            logger.info(f"LoRA adapters:   {artifacts.explora_lora_checkpoint}")
+            logger.info(f"Metrics:         {artifacts.explora_metrics_json}")
+            logger.info("=" * 80)
 
     def phase5_executor(artifacts):
         logger.warning("Phase 5 executor not implemented yet")
