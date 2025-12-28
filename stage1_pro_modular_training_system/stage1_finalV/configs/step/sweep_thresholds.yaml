@@ -1,0 +1,39 @@
+# 🎯 **Step Config: Sweep Thresholds** (Calibration)
+# Phase 2: Threshold Sweep / Calibration (LEAK-PROOF!)
+
+# Default threshold grid (0.0 to 1.0 in 0.1 increments)
+threshold_grid:
+  - 0.0
+  - 0.1
+  - 0.2
+  - 0.3
+  - 0.4
+  - 0.5
+  - 0.6
+  - 0.7
+  - 0.8
+  - 0.9
+  - 1.0
+
+# Target coverage (fraction of samples to keep)
+# LEAK-PROOF: This uses VAL_CALIB only!
+target_coverage: 0.90
+
+# Maximum allowed False Negative Rate
+target_fnr: 0.02
+
+# Optimization objective
+# Options: "coverage" (max coverage subject to FNR constraint),
+#          "fnr" (minimize FNR),
+#          "balanced" (balance accuracy and FNR)
+objectives: "coverage"
+
+# Max batch size for efficient threshold computation
+max_batch_size: 64
+
+# Split contract enforcement
+# LEAK-PROOF: Only VAL_CALIB allowed!
+# STRICTLY FORBIDDEN: VAL_SELECT, VAL_TEST, TRAIN
+allowed_splits:
+  - "val_calib"
+

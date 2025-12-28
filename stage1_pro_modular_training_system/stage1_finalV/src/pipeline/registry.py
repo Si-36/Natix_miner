@@ -64,6 +64,14 @@ class StepRegistry:
             ["ml-team"],
         )
         
+        # 🔥 2026 PRO: Step Spec Registry (Dynamic Discovery)
+        # Automatically discover and register StepSpec subclasses
+        # This eliminates hardcoded step_catalog and makes system extensible
+        from ..steps.sweep_thresholds import SweepThresholdsSpec
+        self._step_specs = {
+            "sweep_thresholds": SweepThresholdsSpec,
+        }
+        
         # Validate: no duplicate step IDs
         if len(self.steps) != len(set(self.steps.keys())):
             raise ValueError(f"Duplicate step IDs detected: {self.steps.keys()}")

@@ -34,6 +34,11 @@ class ArtifactKey(str, Enum):
     VAL_SELECT_LABELS = "val_select_labels"
     VAL_SELECT_METRICS = "val_select_metrics"
     
+    # 🔥 2026 PRO: Calibration artifacts (from Phase 1)
+    # These are exported from Phase 1 for Phase 2 calibration
+    VAL_CALIB_LOGITS = "val_calib_logits"
+    VAL_CALIB_LABELS = "val_calib_labels"
+    
     # Phase 2: Thresholds / Policy
     THRESHOLDS_JSON = "thresholds_json"
     THRESHOLDS_METRICS = "thresholds_metrics"
@@ -96,6 +101,11 @@ class ArtifactStore:
             ArtifactKey.VAL_SELECT_LOGITS: self.artifact_root / "runs" / run_id / "phase1" / "val_select_logits.pt",
             ArtifactKey.VAL_SELECT_LABELS: self.artifact_root / "runs" / run_id / "phase1" / "val_select_labels.pt",
             ArtifactKey.VAL_SELECT_METRICS: self.artifact_root / "runs" / run_id / "phase1" / "metrics.csv",
+            
+            # 🔥 2026 PRO: Calibration artifacts (exported from Phase 1)
+            # These are exported from Phase 1 and consumed by Phase 2
+            ArtifactKey.VAL_CALIB_LOGITS: self.artifact_root / "runs" / run_id / "phase1" / "val_calib_logits.pt",
+            ArtifactKey.VAL_CALIB_LABELS: self.artifact_root / "runs" / run_id / "phase1" / "val_calib_labels.pt",
             
             # Phase 2
             ArtifactKey.THRESHOLDS_JSON: self.artifact_root / "runs" / run_id / "phase2" / "thresholds.json",
