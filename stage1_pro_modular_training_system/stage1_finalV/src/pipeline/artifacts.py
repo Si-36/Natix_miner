@@ -8,11 +8,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import hashlib
 import os
 import tempfile
 import json
+import torch
 
 
 @dataclass(frozen=True)

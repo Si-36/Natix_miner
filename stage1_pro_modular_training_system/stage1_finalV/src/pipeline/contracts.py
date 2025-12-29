@@ -37,33 +37,39 @@ class SplitPolicy:
     
     This is enforced at runtime to prevent accidental data leakage.
     """
-    model_selection: FrozenSet[Split] = frozenset({Split.VAL_SELECT})
-    policy_fitting: FrozenSet[Split] = frozenset({Split.VAL_CALIB})
-    final_eval: FrozenSet[Split] = frozenset({Split.VAL_TEST})
+    model_selection: FrozenSet[str] = frozenset({Split.VAL_SELECT})
+    policy_fitting: FrozenSet[str] = frozenset({Split.VAL_CALIB})
+    final_eval: FrozenSet[str] = frozenset({Split.VAL_TEST})
     
     # Training can use TRAIN + VAL_SELECT
-    training: FrozenSet[Split] = frozenset({Split.TRAIN, Split.VAL_SELECT})
+    training: FrozenSet[str] = frozenset({Split.TRAIN, Split.VAL_SELECT})
 
 
 def assert_allowed(used: FrozenSet[str], allowed: FrozenSet[str], context: str) -> None:
     """
     Assert that only allowed splits were used.
     
-    Raises ValueError if illegal splits are found.
-    
     Args:
-        used: Splits actually used in this phase
-        allowed: Splits allowed for this phase
+        used: Splits actually used (as strings like "val_calib")
+        allowed: Splits allowed for this phase (as strings like ["val_calib"])
         context: Phase name (for error message)
     
     Raises:
         ValueError: If illegal splits detected
+    
+    Note:
+        Split enum values are strings, so we use FrozenSet[str].
+        This validates that used splits are subset of allowed splits.
     """
-    illegal = set(used) - set(allowed)
+    # Convert allowed to set of strings for easier comparison
+    allowed_set = set(allowed)
+    
+    # Check for illegal splits
+    illegal = set(used) - allowed_set
     if illegal:
         raise ValueError(
-            f"[SplitContracts] {context}: illegal splits detected: {sorted([s.value for s in illegal])}. "
-            f"Allowed: {sorted([s.value for s in allowed])}. "
+            f"[SplitContracts] {context}: illegal splits detected: {sorted(list(illegal))}. "
+            f"Allowed: {sorted(list(allowed_set))}. "
             f"This is DATA LEAKAGE - violates leak-proof design!"
         )
 
@@ -73,4 +79,3 @@ __all__ = [
     "SplitPolicy",
     "assert_allowed",
 ]
-

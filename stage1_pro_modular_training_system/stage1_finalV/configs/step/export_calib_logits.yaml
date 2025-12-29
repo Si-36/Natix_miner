@@ -1,0 +1,76 @@
+# 🎯 **Step Config: Export Calib Logits** (Leak-Proof Calibration Data Export)
+# Phase: Export calibration artifacts from trained model
+#
+# Features:
+# - Leak-Proof: VAL_CALIB ONLY (never VAL_SELECT or VAL_TEST!)
+# - Atomic Artifact I/O through ArtifactStore
+# - Hash-based lineage tracking
+#
+# Config:
+# Load best checkpoint from Phase 1
+# Run inference on VAL_CALIB only
+# Extract calibration logits/labels
+# Save to ArtifactStore
+#
+# Split Contract:
+# - Allowed: VAL_CALIB ONLY
+# - Strictly Forbidden: TRAIN, VAL_SELECT, VAL_TEST
+#
+# Artifact Keys:
+# Inputs: None (load checkpoint directly)
+# Outputs:
+#   - VAL_CALIB_LOGITS (calibration logits)
+#   - VAL_CALIB_LABELS (calibration labels)
+
+# Step dependencies:
+# This step depends on "train_baseline_head"
+# It does NOT depend on "sweep_thresholds" (to prevent circular dependency)
+
+# Registry entry (src/pipeline/registry.py):
+# step_id: "export_calib_logits"
+# name: "export_calib_logits"
+# deps: ["train_baseline_head"]
+# order_index: 1 5  # After Phase 1, before Phase 2 (sweep_thresholds)
+# owners: ["ml-team"]
+# tags:
+#   - "priority": "critical",
+#   - "stage": "calibration_export",
+#   - "component": "calibration_data"
+
+# Leak-Proof Enforcement:
+# This step ENFORCES that calibration data is exported SEPARATELY from training!
+# - Phase 1 (train_baseline_head) is forbidden from using VAL_CALIB here
+# - Only VAL_CALIB is allowed for this step
+# - This prevents "training on val_calib" data leakage!
+
+# Usage:
+# Step: export_calib_logits
+#   Loads: train_baseline_head checkpoint
+#   Loader: VAL_CALIB only (from ArtifactStore/StepContext)
+#   Extracts: logits + labels
+#   Saves: VAL_CALIB_LOGITS + VAL_CALIB_LABELS (to ArtifactStore)
+#   Updates: manifest with hashes
+#   Returns: StepResult with artifacts_written, splits_used, metadata
+
+# Expected Output Artifacts:
+#   - runs/<run_id>/phase1/val_calib_logits.pt (calibration logits)
+#   - runs/<run_id>/phase1/val_calib_labels.pt (calibration labels)
+#
+# Manifest updates:
+#   - Finalizes step as "completed"
+#   - Records hashes of inputs (checkpoint) and outputs (logits, labels)
+#   - Records splits_used = {VAL_CALIB}
+#
+# Example Run:
+#   python scripts/run_step.py --step export_calib_logits
+#
+# CLI Arguments (passed from config):
+#   --step: export_calib_logits
+#   --run_id: <timestamp>
+#   --artifact_root: /path/to/artifacts
+#
+# Validation:
+#   - Step can ONLY use VAL_CALIB loader (enforced by split contracts)
+#   - Artifacts MUST be written through ArtifactStore (no raw paths)
+#   - Manifest MUST be updated with hashes
+
