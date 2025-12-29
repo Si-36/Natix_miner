@@ -141,22 +141,33 @@ class ArtifactStore:
 
     def _contains_tensors(self, data: Union[dict, list]) -> bool:
         """
-        Check if dict or list contains torch.Tensor objects.
+        Check if dict or list contains torch.Tensor objects (RECURSIVE).
 
         This is used to detect checkpoint state_dicts which must be saved
         via torch.save() instead of JSON serialization.
+
+        🔥 CRITICAL: Recursively scans nested dicts/lists/tuples to detect
+        tensors anywhere (e.g., {"state_dict": {...tensors...}, "config": {...}})
 
         Args:
             data: Dict or list to check
 
         Returns:
-            True if any tensor found, False otherwise
+            True if any tensor found (at any depth), False otherwise
         """
-        if isinstance(data, dict):
-            return any(isinstance(v, torch.Tensor) for v in data.values())
-        elif isinstance(data, list):
-            return any(isinstance(item, torch.Tensor) for item in data)
-        return False
+
+        def _check_recursive(obj):
+            if isinstance(obj, torch.Tensor):
+                return True
+            elif isinstance(obj, dict):
+                return any(_check_recursive(v) for v in obj.values())
+            elif isinstance(obj, (list, tuple)):
+                return any(_check_recursive(item) for item in obj)
+            return False
+
+        return _check_recursive(data)
+
+        return _check_recursive(data)
 
     def get(self, key: ArtifactKey, run_id: str = "current") -> Path:
         """

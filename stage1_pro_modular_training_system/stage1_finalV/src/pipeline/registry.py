@@ -130,6 +130,7 @@ class StepRegistry:
 
         Raises:
             RuntimeError: If circular dependency detected
+            ValueError: If a dependency is not registered (NEW!)
         """
         if len(self._step_specs) == 0:
             self._discover_steps()
@@ -153,8 +154,17 @@ class StepRegistry:
                     f"Circular dependency detected: {' → '.join(order + [step_name])}"
                 )
 
-            # Visit dependencies first
+            # Get dependencies (with validation - NEW!)
             deps = self._dependency_graph.get(step_name, frozenset())
+
+            # 🔥 CRITICAL: Validate all dependencies are registered
+            for dep in deps:
+                if dep not in self._step_specs:
+                    raise ValueError(
+                        f"Unknown dependency: '{dep}' (step '{dep}' is not registered in StepRegistry)"
+                    )
+
+            # Visit dependencies first
             for dep in deps:
                 visit(dep)
 
@@ -168,7 +178,6 @@ class StepRegistry:
         print(f"   ✅ Execution order resolved:")
         for i, step in enumerate(order, 1):
             print(f"      {i}. {step}")
-
         print("=" * 70)
 
         return order
