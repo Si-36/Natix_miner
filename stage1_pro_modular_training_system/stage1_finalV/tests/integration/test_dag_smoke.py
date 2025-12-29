@@ -74,9 +74,7 @@ def test_export_calib_logits_step():
 
     # Create manifest
     run_id = "test_run_001"
-    config = {
-        "step": step_spec.__dict__() if hasattr(step_spec, "__dict__") else dict(vars(step_spec))
-    }
+    config = {"step": vars(step_spec)}
     manifest_path = store.initialize_manifest(run_id, config)
 
     print(f"   📊 Manifest initialized: {run_id}")

@@ -156,42 +156,49 @@ class MultiScaleLetterbox:
 
 def letterbox_collate_fn(batch):
     """
-    Custom collate function for letterbox transforms.
+    Custom collate function for letterbox transforms (2025-12-29).
 
-    Handles batches where each sample is (image_tensor, content_box, label).
-    Stacks tensors into [B, 3, H, W] and content_boxes into [(x1, y1, x2, y2), ...].
+    Handles batches where each sample is (image_tensor, label, content_box).
+    Stacks tensors into batched format for vectorized multi-view processing.
 
     Args:
-        batch: List of (tensor, content_box, label) tuples
+        batch: List of (image_tensor, label, content_box) tuples
+               where content_box is already Tensor[4] from dataset
 
     Returns:
-        images: [B, 3, H, W]
-        content_boxes: List of (x1, y1, x2, y2) tuples
-        labels: [B]
+        images: Tensor[B, 3, H, W]
+        labels: Tensor[B] (long)
+        content_boxes: Tensor[B, 4] (float32) in (x1, y1, x2, y2) format
     """
     images = []
-    content_boxes = []
     labels = []
+    content_boxes = []
 
     for item in batch:
         if len(item) == 3:
-            image, content_box, label = item
+            # Letterbox mode: (image_tensor, label, content_box)
+            image, label, content_box = item
             images.append(image)
-            content_boxes.append(content_box)
             labels.append(label)
-        elif len(item) == 2:
-            # Unlabeled data (e.g., test set)
-            image, content_box = item
-            images.append(image)
             content_boxes.append(content_box)
+        elif len(item) == 2:
+            # Standard mode: (image_tensor, label) - shouldn't happen with letterbox
+            # But handle gracefully for backward compatibility
+            image, label = item
+            images.append(image)
+            labels.append(label)
+            # No content box, will return None
 
     images = torch.stack(images, dim=0)
+    labels = torch.tensor(labels, dtype=torch.long)
 
-    if labels:
-        labels = torch.tensor(labels, dtype=torch.long)
-        return images, content_boxes, labels
+    if content_boxes:
+        # Stack content boxes into Tensor[B, 4] for vectorized ops
+        content_boxes = torch.stack(content_boxes, dim=0)
+        return images, labels, content_boxes
     else:
-        return images, content_boxes
+        # No content boxes (backward compat)
+        return images, labels
 
 
 # Pre-configured transforms for common use cases

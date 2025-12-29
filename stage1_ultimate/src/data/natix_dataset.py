@@ -333,17 +333,24 @@ class NATIXDataset(Dataset):
         """Return number of samples"""
         return len(self.samples)
 
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
+    def __getitem__(self, idx: int) -> Union[Tuple[torch.Tensor, int], Tuple[torch.Tensor, int, torch.Tensor]]:
         """
-        Get a single sample
+        Get a single sample (2025-12-29 with letterbox support)
 
         Args:
             idx: Index of sample
 
         Returns:
-            Tuple of (image_tensor, label)
-            - image_tensor: torch.Tensor of shape [3, 224, 224]
-            - label: int (0-12 for 13 classes)
+            Train mode OR eval without letterbox:
+                (image_tensor, label)
+                - image_tensor: torch.Tensor [3, H, W]
+                - label: int (0-12 for 13 classes)
+
+            Eval with letterbox mode:
+                (image_tensor, label, content_box)
+                - image_tensor: torch.Tensor [3, canvas, canvas]
+                - label: int (0-12 for 13 classes)
+                - content_box: torch.Tensor [4] in (x1, y1, x2, y2) format
         """
         metadata = self.samples[idx]
 
@@ -357,9 +364,21 @@ class NATIXDataset(Dataset):
 
         # Apply transforms
         if self.transform is not None:
-            image = self.transform(image)
+            result = self.transform(image)
 
-        return image, metadata.label
+            # Check if transform returns (tensor, content_box) tuple (letterbox mode)
+            if isinstance(result, tuple) and len(result) == 2:
+                image_tensor, content_box = result
+                # Convert content_box tuple to Tensor[4] for vectorized ops
+                content_box = torch.tensor(content_box, dtype=torch.float32)
+                return image_tensor, metadata.label, content_box
+            else:
+                # Standard mode (train or legacy eval)
+                image_tensor = result
+                return image_tensor, metadata.label
+        else:
+            # No transform (shouldn't happen in practice)
+            return image, metadata.label
 
     def get_metadata(self, idx: int) -> NATIXImageMetadata:
         """

@@ -16,12 +16,13 @@ Latest 2025-2026 practices:
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 
 import lightning as L
 from torch.utils.data import DataLoader
 
-from data.natix_dataset import NATIXDataset
+from data.natix_dataset import NATIXDataset, get_dinov3_transforms
+from data.transforms import letterbox_collate_fn
 from contracts.split_contracts import Split
 from data.label_schema import LabelSchema
 
@@ -65,6 +66,10 @@ class NATIXDataModule(L.LightningDataModule):
         num_workers: int = 4,
         pin_memory: bool = True,
         persistent_workers: bool = True,
+        # High-res eval settings (2025-12-29)
+        eval_mode: str = "center_crop_224",  # or "letterbox_canvas"
+        eval_canvas_size: int = 896,
+        val_batch_size: Optional[int] = None,  # If None, uses batch_size
     ):
         super().__init__()
 
@@ -74,9 +79,22 @@ class NATIXDataModule(L.LightningDataModule):
         self.data_root = Path(data_root)
         self.splits_json = Path(splits_json)
         self.batch_size = batch_size
+        self.val_batch_size = val_batch_size if val_batch_size is not None else batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         self.persistent_workers = persistent_workers and num_workers > 0
+
+        # Eval settings
+        self.eval_mode = eval_mode
+        self.eval_canvas_size = eval_canvas_size
+
+        # Create transforms (split-specific)
+        self.train_transform = get_dinov3_transforms(train=True)
+        self.eval_transform = get_dinov3_transforms(
+            train=False,
+            eval_mode=eval_mode,
+            eval_canvas_size=eval_canvas_size,
+        )
 
         # Datasets (created in setup())
         self.train_dataset: Optional[NATIXDataset] = None
@@ -86,7 +104,8 @@ class NATIXDataModule(L.LightningDataModule):
 
         logger.info(
             f"Initialized NATIXDataModule: batch_size={batch_size}, "
-            f"num_workers={num_workers}"
+            f"val_batch_size={self.val_batch_size}, num_workers={num_workers}, "
+            f"eval_mode={eval_mode}, eval_canvas_size={eval_canvas_size}"
         )
 
     def prepare_data(self) -> None:
@@ -118,25 +137,33 @@ class NATIXDataModule(L.LightningDataModule):
                 - "predict": Create prediction dataset (same as test)
         """
         if stage == "fit":
-            # Training: need train + val_select (for early stopping)
+            # Training: need train + val_select + val_calib
             logger.info("Setting up datasets for training...")
 
             self.train_dataset = NATIXDataset(
                 data_root=self.data_root,
                 splits_json=self.splits_json,
                 split=Split.TRAIN,
-                transform=None,  # Use DINOv3 defaults
+                transform=self.train_transform,  # 224 crops with augmentation
             )
 
             self.val_select_dataset = NATIXDataset(
                 data_root=self.data_root,
                 splits_json=self.splits_json,
                 split=Split.VAL_SELECT,
-                transform=None,  # Use DINOv3 defaults
+                transform=self.eval_transform,  # High-res letterbox (if enabled)
+            )
+
+            self.val_calib_dataset = NATIXDataset(
+                data_root=self.data_root,
+                splits_json=self.splits_json,
+                split=Split.VAL_CALIB,
+                transform=self.eval_transform,  # High-res letterbox (if enabled)
             )
 
             logger.info(f"Train: {len(self.train_dataset)} samples")
             logger.info(f"Val Select: {len(self.val_select_dataset)} samples")
+            logger.info(f"Val Calib: {len(self.val_calib_dataset)} samples")
 
         elif stage == "validate":
             # Validation: need val_select
@@ -146,7 +173,7 @@ class NATIXDataModule(L.LightningDataModule):
                 data_root=self.data_root,
                 splits_json=self.splits_json,
                 split=Split.VAL_SELECT,
-                transform=None,
+                transform=self.eval_transform,
             )
 
             logger.info(f"Val Select: {len(self.val_select_dataset)} samples")
@@ -159,7 +186,7 @@ class NATIXDataModule(L.LightningDataModule):
                 data_root=self.data_root,
                 splits_json=self.splits_json,
                 split=Split.VAL_TEST,
-                transform=None,
+                transform=self.eval_transform,
             )
 
             logger.info(f"Val Test: {len(self.val_test_dataset)} samples")
@@ -172,7 +199,7 @@ class NATIXDataModule(L.LightningDataModule):
                 data_root=self.data_root,
                 splits_json=self.splits_json,
                 split=Split.VAL_TEST,
-                transform=None,
+                transform=self.eval_transform,
             )
 
             logger.info(f"Prediction: {len(self.val_test_dataset)} samples")
@@ -201,47 +228,46 @@ class NATIXDataModule(L.LightningDataModule):
         """
         Create validation dataloaders (BOTH val_select AND val_calib)
 
-        CRITICAL FIX: Returns TWO loaders to prevent data leakage:
+        CRITICAL FIX (2025-12-29):
+        - Returns TWO loaders to prevent data leakage
         - Loader 0 (val_select): For early stopping / model selection
         - Loader 1 (val_calib): For policy fitting / calibration
+        - Uses letterbox_collate_fn when eval_mode=letterbox_canvas
+        - Uses val_batch_size (smaller than train due to multi-view)
 
         Lightning will call validation_step() with dataloader_idx to distinguish them.
 
         Returns:
             List of [val_select_loader, val_calib_loader]
         """
-        if self.val_select_dataset is None:
-            raise RuntimeError("val_select_dataset is None. Call setup('fit') first.")
+        if self.val_select_dataset is None or self.val_calib_dataset is None:
+            raise RuntimeError("Validation datasets are None. Call setup('fit') first.")
 
-        # Create val_calib dataset if not exists
-        if self.val_calib_dataset is None:
-            self.val_calib_dataset = NATIXDataset(
-                data_root=self.data_root,
-                splits_json=self.splits_json,
-                split=Split.VAL_CALIB,
-                transform=None,
-            )
+        # Determine collate function based on eval_mode
+        collate_fn = letterbox_collate_fn if self.eval_mode == "letterbox_canvas" else None
 
         # Loader 0: val_select (for model selection)
         val_select_loader = DataLoader(
             self.val_select_dataset,
-            batch_size=self.batch_size,
+            batch_size=self.val_batch_size,  # Use val_batch_size (smaller for multi-view)
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
             persistent_workers=self.persistent_workers,
             drop_last=False,
+            collate_fn=collate_fn,  # Use letterbox collate if needed
         )
 
         # Loader 1: val_calib (for calibration)
         val_calib_loader = DataLoader(
             self.val_calib_dataset,
-            batch_size=self.batch_size,
+            batch_size=self.val_batch_size,  # Use val_batch_size
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
             persistent_workers=self.persistent_workers,
             drop_last=False,
+            collate_fn=collate_fn,  # Use letterbox collate if needed
         )
 
         # CRITICAL: Return BOTH loaders
@@ -249,11 +275,12 @@ class NATIXDataModule(L.LightningDataModule):
 
     def test_dataloader(self) -> DataLoader:
         """
-        Create test dataloader (val_test)
+        Create test dataloader (val_test) with letterbox support
 
         This is used for:
         - Final evaluation ONLY
         - NEVER touch during training/tuning!
+        - Uses letterbox_collate_fn when eval_mode=letterbox_canvas
 
         Returns:
             DataLoader for test set (val_test)
@@ -261,14 +288,18 @@ class NATIXDataModule(L.LightningDataModule):
         if self.val_test_dataset is None:
             raise RuntimeError("val_test_dataset is None. Call setup('test') first.")
 
+        # Determine collate function based on eval_mode
+        collate_fn = letterbox_collate_fn if self.eval_mode == "letterbox_canvas" else None
+
         return DataLoader(
             self.val_test_dataset,
-            batch_size=self.batch_size,
+            batch_size=self.val_batch_size,  # Use val_batch_size for multi-view
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
             persistent_workers=self.persistent_workers,
             drop_last=False,
+            collate_fn=collate_fn,
         )
 
     def predict_dataloader(self) -> DataLoader:
@@ -284,7 +315,7 @@ class NATIXDataModule(L.LightningDataModule):
 
     def val_calib_dataloader(self) -> DataLoader:
         """
-        Create calibration dataloader (val_calib)
+        Create calibration dataloader (val_calib) with letterbox support
 
         This is used for:
         - Policy fitting (threshold sweep)
@@ -302,17 +333,21 @@ class NATIXDataModule(L.LightningDataModule):
                 data_root=self.data_root,
                 splits_json=self.splits_json,
                 split=Split.VAL_CALIB,
-                transform=None,
+                transform=self.eval_transform,
             )
+
+        # Determine collate function based on eval_mode
+        collate_fn = letterbox_collate_fn if self.eval_mode == "letterbox_canvas" else None
 
         return DataLoader(
             self.val_calib_dataset,
-            batch_size=self.batch_size,
+            batch_size=self.val_batch_size,  # Use val_batch_size
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
             persistent_workers=self.persistent_workers,
             drop_last=False,
+            collate_fn=collate_fn,
         )
 
     @property
