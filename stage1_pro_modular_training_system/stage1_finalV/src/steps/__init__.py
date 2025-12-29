@@ -18,8 +18,10 @@ Steps:
 """
 
 from .sweep_thresholds import SweepThresholdsSpec
+from .export_calib_logits import ExportCalibLogitsSpec
 
 __all__ = [
     "SweepThresholdsSpec",
+    "ExportCalibLogitsSpec",
 ]
 

@@ -18,13 +18,17 @@ This replaces hardcoded _deps dictionaries and prevents
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Optional, Any
 from pathlib import Path
 import sys
 
 # Import StepSpec base class
 from .step_api import StepSpec
+
+# Import step specs (absolute imports to avoid circular dependencies)
+from steps.export_calib_logits import ExportCalibLogitsSpec
+from steps.sweep_thresholds import SweepThresholdsSpec
 
 # Dynamically import all step specs
 # This makes the registry extensible - new steps are auto-discovered!
@@ -37,7 +41,7 @@ from .step_api import StepSpec
 # from ..steps.sweep_thresholds import SweepThresholdsSpec
 
 
-@dataclass(frozen=True)
+@dataclass
 class StepRegistry:
     """
     Step Registry (2026 PRO Standard).
@@ -47,10 +51,10 @@ class StepRegistry:
     """
     
     # Step catalog (step_name: StepSpec)
-    _step_specs: Optional[Dict[str, type[StepSpec]]] = None
+    _step_specs: Optional[Dict[str, type[StepSpec]]] = field(default=None)
     
     # Dependency graph (step_name: set[dependency_names])
-    _dependency_graph: Optional[Dict[str, frozenset[str]]] = None
+    _dependency_graph: Optional[Dict[str, frozenset[str]]] = field(default=None)
     
     def __post_init__(self):
         """Initialize step catalog with lazy loading"""
@@ -72,11 +76,7 @@ class StepRegistry:
         print(f"🔍 Discovering Steps")
         print("=" * 70)
         
-        # Import step specs
-        from ..steps.export_calib_logits import ExportCalibLogitsSpec
-        from ..steps.sweep_thresholds import SweepThresholdsSpec
-        
-        # Register steps
+        # Register steps (imported at module level to avoid circular dependencies)
         self._step_specs = {
             "export_calib_logits": ExportCalibLogitsSpec,
             "sweep_thresholds": SweepThresholdsSpec,

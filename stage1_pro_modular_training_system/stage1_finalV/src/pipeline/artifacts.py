@@ -2,13 +2,15 @@
 🔒️ **Artifacts** - Canonical Artifact Keys (No Raw Paths)
 Implements: ArtifactKey enum + ArtifactStore for path resolution
 This prevents "forgot to save X" bugs and provides atomic writes
+
+🔥 2026 PRO: Real atomic writes with os.fsync()!
 """
 
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 import hashlib
 import os
 import tempfile
@@ -59,6 +61,8 @@ class ArtifactStore:
     """
     Artifact store with atomic writes and path resolution.
     
+    🔥 2026 PRO: Real atomic writes with os.fsync()!
+    
     Features:
     - get(key): Resolve canonical key to absolute path
     - put(key, data): Atomic write with streaming hash
@@ -101,31 +105,34 @@ class ArtifactStore:
             Absolute path to artifact
         """
         # Key-specific path resolution
+        run_dir = self.artifact_root / "runs" / run_id
+        
         key_paths = {
-            ArtifactKey.RUN_MANIFEST: self.artifact_root / "runs" / run_id / "run_manifest.json",
+            # Run-level
+            ArtifactKey.RUN_MANIFEST: run_dir / "run_manifest.json",
             
             # Phase 1
-            ArtifactKey.MODEL_CHECKPOINT: self.artifact_root / "runs" / run_id / "phase1" / "model_best.pth",
-            ArtifactKey.VAL_SELECT_LOGITS: self.artifact_root / "runs" / run_id / "phase1" / "val_select_logits.pt",
-            ArtifactKey.VAL_SELECT_LABELS: self.artifact_root / "runs" / run_id / "phase1" / "val_select_labels.pt",
-            ArtifactKey.VAL_SELECT_METRICS: self.artifact_root / "runs" / run_id / "phase1" / "metrics.csv",
+            ArtifactKey.MODEL_CHECKPOINT: run_dir / "phase1" / "model_best.pth",
+            ArtifactKey.VAL_SELECT_LOGITS: run_dir / "phase1" / "val_select_logits.pt",
+            ArtifactKey.VAL_SELECT_LABELS: run_dir / "phase1" / "val_select_labels.pt",
+            ArtifactKey.VAL_SELECT_METRICS: run_dir / "phase1" / "metrics.csv",
             
             # 🔥 2026 PRO: Calibration artifacts (exported from Phase 1)
-            ArtifactKey.VAL_CALIB_LOGITS: self.artifact_root / "runs" / run_id / "phase1" / "val_calib_logits.pt",
-            ArtifactKey.VAL_CALIB_LABELS: self.artifact_root / "runs" / run_id / "phase1" / "val_calib_labels.pt",
+            ArtifactKey.VAL_CALIB_LOGITS: run_dir / "phase1" / "val_calib_logits.pt",
+            ArtifactKey.VAL_CALIB_LABELS: run_dir / "phase1" / "val_calib_labels.pt",
             
             # Phase 2
-            ArtifactKey.THRESHOLDS_JSON: self.artifact_root / "runs" / run_id / "phase2" / "thresholds.json",
-            ArtifactKey.THRESHOLDS_METRICS: self.artifact_root / "runs" / run_id / "phase2" / "thresholds_metrics.csv",
+            ArtifactKey.THRESHOLDS_JSON: run_dir / "phase2" / "thresholds.json",
+            ArtifactKey.THRESHOLDS_METRICS: run_dir / "phase2" / "thresholds_metrics.csv",
             
             # Phase 3
-            ArtifactKey.GATE_CHECKPOINT: self.artifact_root / "runs" / run_id / "phase3" / "gate_best.pth",
-            ArtifactKey.GATE_PARAMS_JSON: self.artifact_root / "runs" / run_id / "phase3" / "gate_params.json",
-            ArtifactKey.GATE_EVALUATION_METRICS: self.artifact_root / "runs" / run_id / "phase3" / "gate_metrics.csv",
+            ArtifactKey.GATE_CHECKPOINT: run_dir / "phase3" / "gate_best.pth",
+            ArtifactKey.GATE_PARAMS_JSON: run_dir / "phase3" / "gate_params.json",
+            ArtifactKey.GATE_EVALUATION_METRICS: run_dir / "phase3" / "gate_metrics.csv",
             
             # Phase 6
-            ArtifactKey.BUNDLE_JSON: self.artifact_root / "runs" / run_id / "phase6" / "export" / "bundle.json",
-            ArtifactKey.BUNDLE_README: self.artifact_root / "runs" / run_id / "phase6" / "export" / "README.md",
+            ArtifactKey.BUNDLE_JSON: run_dir / "phase6" / "export" / "bundle.json",
+            ArtifactKey.BUNDLE_README: run_dir / "phase6" / "export" / "README.md",
         }
         
         if key not in key_paths:
@@ -152,11 +159,11 @@ class ArtifactStore:
         
         return self._get_key_path(key, run_id)
     
-    def put(self, key: ArtifactKey, data: Any, run_id: str = "current") -> Path:
+    def put(self, key: ArtifactKey, data: Union[torch.Tensor, dict, list, str, bytes], run_id: str = "current") -> Path:
         """
         Atomically write artifact data.
         
-        🔥 2026 PRO: Real atomic writes with fsync!
+        🔥 2026 PRO: Real atomic writes with os.fsync()!
         
         Atomic write pattern:
         1. Write to temp file in same directory
@@ -170,7 +177,7 @@ class ArtifactStore:
         
         Args:
             key: Canonical artifact key
-            data: Data to write (bytes, str, tensor, dict, list, json-serializable)
+            data: Data to write (torch.Tensor, dict, list, str, bytes)
             run_id: Run identifier (default to "current")
         
         Returns:
@@ -188,7 +195,7 @@ class ArtifactStore:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         
         # Handle different data types with proper atomic writes
-        if isinstance(data, (torch.Tensor,)):
+        if isinstance(data, torch.Tensor):
             # 🔥 Binary data (tensors, bytes)
             self._put_binary_data(data, target_path, key, run_id)
         
@@ -196,17 +203,25 @@ class ArtifactStore:
             # 🔥 Text/JSON data
             self._put_json_data(data, target_path, key, run_id)
         
+        elif isinstance(data, str):
+            # 🔥 String data (text, CSV, etc.)
+            self._put_string_data(data, target_path, key, run_id)
+        
+        elif isinstance(data, bytes):
+            # 🔥 Raw bytes data
+            self._put_bytes_data(data, target_path, key, run_id)
+        
         else:
             raise TypeError(f"Unsupported data type for artifact write: {type(data)}")
         
         return target_path
     
-    def _put_binary_data(self, data: torch.Tensor | bytes, target_path: Path, key: ArtifactKey, run_id: str) -> None:
+    def _put_binary_data(self, data: torch.Tensor, target_path: Path, key: ArtifactKey, run_id: str) -> None:
         """
-        Atomically write binary data (tensors, bytes) with fsync.
+        Atomically write binary data (tensors) with fsync.
         
         Args:
-            data: Binary data to write
+            data: PyTorch tensor
             target_path: Target file path
             key: Artifact key
             run_id: Run identifier
@@ -214,33 +229,24 @@ class ArtifactStore:
         🔥 2026 PRO: Uses real fsync for crash safety!
         """
         # Create temp file in same directory
-        import tempfile
         temp_dir = tempfile.mkdtemp(dir=str(target_path.parent))
-        temp_file = temp_dir / f"tmp_{target_path.name}.bin"
+        temp_file_path = os.path.join(temp_dir, f"tmp_{target_path.name}.bin")
         
         try:
-            # Write data
-            if isinstance(data, torch.Tensor):
-                # Save tensor
-                torch.save(data, temp_file)
-                data_size = temp_file.stat().st_size
-            else:
-                # Save bytes
-                temp_file.write_bytes(data)
-                data_size = temp_file.stat().st_size
+            # Save tensor to temp file
+            torch.save(data, temp_file_path)
             
             # 🔥 CRITICAL: Flush to disk (fsync on file descriptor!)
-            temp_fd = temp_file.open("r")
+            temp_fd = os.open(temp_file_path, os.O_RDONLY)
             os.fsync(temp_fd)
             os.close(temp_fd)
             
             # Atomic replace
-            os.replace(temp_file, target_path)
-            print(f"✅ Atomic write (binary with fsync): {target_path}")
+            os.replace(temp_file_path, target_path)
+            print(f"✅ Atomic write (tensor with fsync): {target_path}")
             
             # Clean up
-            os.remove(temp_file)
-            os.removedirs(temp_dir, exist_ok=True)
+            os.removedirs(temp_dir)
             
             # Record hash
             file_hash = self._hash_file(target_path)
@@ -249,20 +255,25 @@ class ArtifactStore:
             
         except Exception as e:
             # On failure, clean up temp
-            os.remove(temp_file)
-            os.removedirs(temp_dir, exist_ok=True)
+            try:
+                os.remove(temp_file_path)
+            except:
+                pass
+            try:
+                os.removedirs(temp_dir)
+            except:
+                pass
             raise e
     
-    def _put_json_data(self, data: Any, target_path: Path, key: ArtifactKey, run_id: str) -> None:
+    def _put_json_data(self, data: Union[dict, list], target_path: Path, key: ArtifactKey, run_id: str) -> None:
         """
         Atomically write JSON/text data.
         
         🔥 2026 PRO: Uses real fsync for crash safety!
         """
         # Create temp file in same directory
-        import tempfile
         temp_dir = tempfile.mkdtemp(dir=str(target_path.parent))
-        temp_file = temp_dir / f"tmp_{target_path.name}.json"
+        temp_file_path = os.path.join(temp_dir, f"tmp_{target_path.name}.json")
         
         try:
             # Serialize JSON
@@ -272,21 +283,20 @@ class ArtifactStore:
                 json_data = str(data)
             
             # Write to temp
-            with temp_file.open("w", encoding="utf-8") as f:
+            with open(temp_file_path, "w", encoding="utf-8") as f:
                 f.write(json_data)
             
             # 🔥 CRITICAL: Flush to disk (fsync on file descriptor!)
-            temp_fd = temp_file.open("r")
+            temp_fd = os.open(temp_file_path, os.O_RDONLY)
             os.fsync(temp_fd)
             os.close(temp_fd)
             
             # Atomic replace
-            os.replace(temp_file, target_path)
+            os.replace(temp_file_path, target_path)
             print(f"✅ Atomic write (json with fsync): {target_path}")
             
             # Clean up
-            os.remove(temp_file)
-            os.removedirs(temp_dir, exist_ok=True)
+            os.removedirs(temp_dir)
             
             # Record hash
             file_hash = self._hash_file(target_path)
@@ -295,8 +305,102 @@ class ArtifactStore:
             
         except Exception as e:
             # On failure, clean up temp
-            os.remove(temp_file)
-            os.removedirs(temp_dir, exist_ok=True)
+            try:
+                os.remove(temp_file_path)
+            except:
+                pass
+            try:
+                os.removedirs(temp_dir)
+            except:
+                pass
+            raise e
+    
+    def _put_string_data(self, data: str, target_path: Path, key: ArtifactKey, run_id: str) -> None:
+        """
+        Atomically write string data (text, CSV, etc.).
+        
+        🔥 2026 PRO: Uses real fsync for crash safety!
+        """
+        # Create temp file in same directory
+        temp_dir = tempfile.mkdtemp(dir=str(target_path.parent))
+        temp_file_path = os.path.join(temp_dir, f"tmp_{target_path.name}.txt")
+        
+        try:
+            # Write to temp
+            with open(temp_file_path, "w", encoding="utf-8") as f:
+                f.write(data)
+            
+            # 🔥 CRITICAL: Flush to disk (fsync on file descriptor!)
+            temp_fd = os.open(temp_file_path, os.O_RDONLY)
+            os.fsync(temp_fd)
+            os.close(temp_fd)
+            
+            # Atomic replace
+            os.replace(temp_file_path, target_path)
+            print(f"✅ Atomic write (string with fsync): {target_path}")
+            
+            # Clean up
+            os.removedirs(temp_dir)
+            
+            # Record hash
+            file_hash = self._hash_file(target_path)
+            self._hashes[key.value] = file_hash
+            self._update_manifest_hashes()
+            
+        except Exception as e:
+            # On failure, clean up temp
+            try:
+                os.remove(temp_file_path)
+            except:
+                pass
+            try:
+                os.removedirs(temp_dir)
+            except:
+                pass
+            raise e
+    
+    def _put_bytes_data(self, data: bytes, target_path: Path, key: ArtifactKey, run_id: str) -> None:
+        """
+        Atomically write raw bytes data.
+        
+        🔥 2026 PRO: Uses real fsync for crash safety!
+        """
+        # Create temp file in same directory
+        temp_dir = tempfile.mkdtemp(dir=str(target_path.parent))
+        temp_file_path = os.path.join(temp_dir, f"tmp_{target_path.name}.bin")
+        
+        try:
+            # Write bytes to temp
+            with open(temp_file_path, "wb") as f:
+                f.write(data)
+            
+            # 🔥 CRITICAL: Flush to disk (fsync on file descriptor!)
+            temp_fd = os.open(temp_file_path, os.O_RDONLY)
+            os.fsync(temp_fd)
+            os.close(temp_fd)
+            
+            # Atomic replace
+            os.replace(temp_file_path, target_path)
+            print(f"✅ Atomic write (bytes with fsync): {target_path}")
+            
+            # Clean up
+            os.removedirs(temp_dir)
+            
+            # Record hash
+            file_hash = self._hash_file(target_path)
+            self._hashes[key.value] = file_hash
+            self._update_manifest_hashes()
+            
+        except Exception as e:
+            # On failure, clean up temp
+            try:
+                os.remove(temp_file_path)
+            except:
+                pass
+            try:
+                os.removedirs(temp_dir)
+            except:
+                pass
             raise e
     
     def put_from_file(self, key: ArtifactKey, source_path: Path, run_id: str = "current") -> Path:
@@ -314,30 +418,42 @@ class ArtifactStore:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         
         # Atomic copy: copy to temp → fsync → replace
-        import tempfile
         temp_dir = tempfile.mkdtemp(dir=str(target_path.parent))
-        temp_file = temp_dir / f"tmp_{target_path.name}"
+        temp_file_path = os.path.join(temp_dir, f"tmp_{target_path.name}")
         
-        # Copy
-        import shutil
-        shutil.copy2(source_path, temp_file)
-        
-        # 🔥 CRITICAL: Flush to disk (fsync on file descriptor!)
-        temp_fd = temp_file.open("r")
-        os.fsync(temp_fd)
-        os.close(temp_fd)
-        
-        # Atomic replace
-        shutil.replace(temp_file, target_path)
-        print(f"✅ Atomic write (copy with fsync): {target_path}")
-        
-        # Clean up
-        shutil.rmtree(temp_dir)
-        
-        # Record hash
-        file_hash = self._hash_file(target_path)
-        self._hashes[key.value] = file_hash
-        self._update_manifest_hashes()
+        try:
+            # Copy
+            import shutil
+            shutil.copy2(source_path, temp_file_path)
+            
+            # 🔥 CRITICAL: Flush to disk (fsync on file descriptor!)
+            temp_fd = os.open(temp_file_path, os.O_RDONLY)
+            os.fsync(temp_fd)
+            os.close(temp_fd)
+            
+            # Atomic replace
+            shutil.replace(temp_file_path, target_path)
+            print(f"✅ Atomic write (copy with fsync): {target_path}")
+            
+            # Clean up
+            os.removedirs(temp_dir)
+            
+            # Record hash
+            file_hash = self._hash_file(target_path)
+            self._hashes[key.value] = file_hash
+            self._update_manifest_hashes()
+            
+        except Exception as e:
+            # On failure, clean up temp
+            try:
+                os.remove(temp_file_path)
+            except:
+                pass
+            try:
+                os.removedirs(temp_dir)
+            except:
+                pass
+            raise e
         
         return target_path
     
@@ -370,7 +486,7 @@ class ArtifactStore:
         
         return True
     
-    def hash_exists(self, key: ArtifactKey, run_id: str = "current", expected_hash: str) -> bool:
+    def hash_exists(self, key: ArtifactKey, expected_hash: str, run_id: str = "current") -> bool:
         """
         Check if artifact hash matches expected.
         
@@ -380,8 +496,8 @@ class ArtifactStore:
         
         Args:
             key: Canonical artifact key
-            run_id: Run identifier
             expected_hash: Expected hash value
+            run_id: Run identifier
         
         Returns:
             True if hash matches, False otherwise
@@ -527,7 +643,8 @@ class ArtifactStore:
                 "metadata": metadata or {},
             }
         
-        self.save_manifest(self.artifact_root / "runs" / self._manifest.get("run_id", "unknown") / "run_manifest.json")
+        manifest_path = self.artifact_root / "runs" / self._manifest.get("run_id", "unknown") / "run_manifest.json"
+        self.save_manifest(manifest_path)
         return None
     
     def finalize_step(self, step_id: str, status: str = "completed", metrics: Dict[str, Any] = None) -> None:
@@ -554,7 +671,8 @@ class ArtifactStore:
             "metadata": metrics or {},
         }
         
-        self.save_manifest(self.artifact_root / "runs" / self._manifest.get("run_id", "unknown") / "run_manifest.json")
+        manifest_path = self.artifact_root / "runs" / self._manifest.get("run_id", "unknown") / "run_manifest.json"
+        self.save_manifest(manifest_path)
         return None
     
     def get_run_dir(self, run_id: str = "current") -> Path:
