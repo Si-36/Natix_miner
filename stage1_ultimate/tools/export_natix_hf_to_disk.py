@@ -15,8 +15,8 @@ import random
 from collections import defaultdict
 from tqdm import tqdm
 
-# Output directory
-OUT = Path("/data/natix_hf_export")
+# Output directory (use project data dir to avoid permission issues)
+OUT = Path.home() / "data" / "natix"
 IMG_DIR = OUT / "images"
 IMG_DIR.mkdir(parents=True, exist_ok=True)
 

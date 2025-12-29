@@ -22,8 +22,8 @@ class StepRegistry:
     No hardcoded dependencies - DAG engine reads from here.
     """
 
-    # Step catalog (step_name: StepSpec)
-    _step_specs: Dict[str, type[StepSpec]] = field(default_factory=dict)
+# Step catalog (step_name: StepSpec)
+_step_specs: Dict[str, type[StepSpec]] = field(default_factory=dict)
 
     # Dependency graph (step_name: set[dependency_names])
     _dependency_graph: Dict[str, frozenset[str]] = field(default_factory=dict)
@@ -50,6 +50,7 @@ class StepRegistry:
         from steps.export_calib_logits import ExportCalibLogitsSpec
         from steps.sweep_thresholds import SweepThresholdsSpec
 
+from steps.train_baseline_head import TrainBaselineHeadSpec
         # Register steps
         self._step_specs = {
             "export_calib_logits": ExportCalibLogitsSpec,

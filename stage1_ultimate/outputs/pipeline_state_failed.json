@@ -1,0 +1,15 @@
+{
+  "executions": {
+    "phase1_baseline": {
+      "phase_type": "phase1_baseline",
+      "status": "failed",
+      "start_time": 1767036281.1851773,
+      "end_time": 1767037249.0743403,
+      "duration_seconds": 967.889163017273,
+      "duration_minutes": 16.131486050287883,
+      "error_message": "Phase Phase 1: Baseline Training missing expected outputs:\n  - /home/sina/projects/miner_b/stage1_ultimate/outputs/stage1_ultimate/2025-12-29/22-54-41/phase1/metrics.csv"
+    }
+  },
+  "start_time": 1767036281.1850557,
+  "end_time": null
+}

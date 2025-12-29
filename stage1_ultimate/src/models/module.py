@@ -90,8 +90,10 @@ class EMA:
         """
         for name, param in model.named_parameters():
             if param.requires_grad and name in self.shadow:
+                # Ensure shadow is on same device as param (handles CPU->CUDA migration)
+                shadow = self.shadow[name].to(param.device)
                 self.shadow[name] = (
-                    self.decay * self.shadow[name] + (1 - self.decay) * param.data
+                    self.decay * shadow + (1 - self.decay) * param.data
                 )
 
     @torch.no_grad()
@@ -100,7 +102,8 @@ class EMA:
         for name, param in self.model.named_parameters():
             if param.requires_grad and name in self.shadow:
                 self.backup[name] = param.data.clone()
-                param.data.copy_(self.shadow[name])
+                # Ensure shadow is on same device as param
+                param.data.copy_(self.shadow[name].to(param.device))
 
     @torch.no_grad()
     def restore(self) -> None:

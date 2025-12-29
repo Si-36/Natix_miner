@@ -204,12 +204,16 @@ def register_phase_executors(engine: DAGEngine, cfg: DictConfig) -> None:
             logger.error(f"Best checkpoint not found: {best_ckpt_path}")
 
         # CRITICAL FIX: Write metrics.csv (required by contract)
-        if hasattr(trainer.logger, 'metrics') and trainer.logger.metrics:
-            metrics_df = pd.DataFrame(trainer.logger.metrics)
-            metrics_df.to_csv(artifacts.metrics_csv, index=False)
-            logger.info(f"Saved metrics: {artifacts.metrics_csv}")
+        # Lightning CSVLogger saves to log_dir/version_X/metrics.csv
+        if trainer.logger and hasattr(trainer.logger, 'log_dir'):
+            lightning_metrics_csv = Path(trainer.logger.log_dir) / "metrics.csv"
+            if lightning_metrics_csv.exists():
+                shutil.copy2(lightning_metrics_csv, artifacts.metrics_csv)
+                logger.info(f"Copied metrics: {lightning_metrics_csv} → {artifacts.metrics_csv}")
+            else:
+                logger.warning(f"Lightning metrics.csv not found at {lightning_metrics_csv}")
         else:
-            logger.warning("No metrics to save (trainer.logger.metrics empty)")
+            logger.warning("No logger with log_dir found")
 
         # Save config (config-driven, NOT hardcoded!)
         import json
@@ -663,6 +667,18 @@ def main(cfg: DictConfig) -> None:
     output_dir = cfg.get("output_dir", "outputs")
     artifacts = create_artifact_schema(output_dir)
     artifacts.ensure_dirs()  # Create all directories
+
+    # Copy splits.json from data_root if it doesn't exist in output_dir
+    # This is needed because Hydra creates a new timestamped directory for each run
+    if not artifacts.splits_json.exists():
+        data_root = Path(cfg.data.data_root)
+        source_splits = data_root / "splits.json"
+        if source_splits.exists():
+            import shutil
+            shutil.copy(source_splits, artifacts.splits_json)
+            logger.info(f"✅ Copied splits.json from {source_splits} to {artifacts.splits_json}")
+        else:
+            logger.warning(f"⚠️ splits.json not found at {source_splits}")
 
     # Create DAG engine
     engine = DAGEngine(artifacts=artifacts)
