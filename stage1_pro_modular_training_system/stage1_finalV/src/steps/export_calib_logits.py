@@ -23,12 +23,12 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from src.pipeline.step_api import StepSpec, StepContext, StepResult
-from src.pipeline.artifacts import ArtifactKey, ArtifactStore
-from src.pipeline.contracts import Split, assert_allowed
-from src.models.backbone import DINOv3Backbone
-from src.models.head import Stage1Head
-from src.training.lightning_data_module import RoadworkDataModule
+from pipeline.step_api import StepSpec, StepContext, StepResult
+from pipeline.artifacts import ArtifactKey, ArtifactStore
+from pipeline.contracts import Split, assert_allowed
+from models.backbone import DINOv3Backbone
+from models.head import Stage1Head
+from training.lightning_data_module import RoadworkDataModule
 
 
 @dataclass

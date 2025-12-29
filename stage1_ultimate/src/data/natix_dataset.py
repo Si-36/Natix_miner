@@ -18,7 +18,7 @@ Latest 2025-2026 practices:
 import json
 import logging
 from pathlib import Path
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, Union, Tuple
 from dataclasses import dataclass
 
 import torch
@@ -28,6 +28,7 @@ import torchvision.transforms as T
 
 from contracts.split_contracts import Split, SplitValidator
 from data.label_schema import LabelSchema
+from data.transforms import get_letterbox_transform
 
 logger = logging.getLogger(__name__)
 
@@ -48,19 +49,27 @@ class NATIXImageMetadata:
     image_id: str  # Unique identifier
 
 
-def get_dinov3_transforms(train: bool = True) -> T.Compose:
+def get_dinov3_transforms(
+    train: bool = True,
+    eval_mode: str = "center_crop_224",
+    eval_canvas_size: int = 896,
+) -> Union[T.Compose, Callable]:
     """
-    Get DINOv3 canonical transforms
+    Get DINOv3 canonical transforms (2025-12-29 with high-res eval support)
 
     Args:
         train: If True, apply training augmentation (RandomResizedCrop, horizontal flip)
-               If False, apply validation transforms (Resize + CenterCrop)
+               If False, apply validation transforms
+        eval_mode: Eval transform mode (only used if train=False):
+                   - "center_crop_224": Legacy Resize(256) + CenterCrop(224)
+                   - "letterbox_canvas": High-res letterbox to preserve 4K detail (BEST)
+        eval_canvas_size: Canvas size for letterbox mode (896, 1024, or 1280)
 
     Returns:
-        Composed transforms for DINOv3
+        Composed transforms for DINOv3 (or letterbox transform for eval)
     """
     if train:
-        # Training transforms with data augmentation
+        # Training transforms with data augmentation (224×224 crops)
         return T.Compose(
             [
                 T.RandomResizedCrop(
@@ -74,17 +83,28 @@ def get_dinov3_transforms(train: bool = True) -> T.Compose:
             ]
         )
     else:
-        # Validation/test transforms (deterministic)
-        return T.Compose(
-            [
-                T.Resize(
-                    256, interpolation=T.InterpolationMode.BICUBIC
-                ),  # Resize shorter edge to 256
-                T.CenterCrop(DINOV3_IMAGE_SIZE),
-                T.ToTensor(),
-                T.Normalize(mean=DINOV3_MEAN, std=DINOV3_STD),
-            ]
-        )
+        # Validation/test transforms
+        if eval_mode == "letterbox_canvas":
+            # HIGH-RES MODE (BEST for max accuracy)
+            # Returns: (tensor, content_box) tuple
+            return get_letterbox_transform(
+                canvas_size=eval_canvas_size,
+                mean=DINOV3_MEAN,
+                std=DINOV3_STD,
+            )
+        else:
+            # LEGACY MODE (center_crop_224)
+            # Returns: tensor only
+            return T.Compose(
+                [
+                    T.Resize(
+                        256, interpolation=T.InterpolationMode.BICUBIC
+                    ),  # Resize shorter edge to 256
+                    T.CenterCrop(DINOV3_IMAGE_SIZE),
+                    T.ToTensor(),
+                    T.Normalize(mean=DINOV3_MEAN, std=DINOV3_STD),
+                ]
+            )
 
 
 class NATIXDataset(Dataset):

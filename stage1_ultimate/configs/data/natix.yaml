@@ -42,15 +42,24 @@ splits:
 
 # Image preprocessing
 preprocessing:
+  # Training (224×224 crops for speed + regularization)
   resize: 224  # DINOv3 standard resolution
   crop_size: 224
   mean: [0.485, 0.456, 0.406]  # ImageNet mean
   std: [0.229, 0.224, 0.225]   # ImageNet std
   interpolation: bilinear
 
+  # Eval (high-res canvas for max accuracy)
+  eval_mode: letterbox_canvas  # "center_crop_224" (legacy) or "letterbox_canvas" (best)
+  eval_canvas_size: 896  # Start with 896, can increase to 1024/1280 (VRAM permitting)
+  eval_letterbox: true  # Preserve aspect ratio, pad to square
+  eval_multiscale: false  # Set true for multi-scale ensemble (896 + 1024)
+  eval_canvas_sizes: [896, 1024]  # Used if eval_multiscale=true
+
 # Data loading
 dataloader:
-  batch_size: 32
+  batch_size: 32  # Training batch size
+  val_batch_size: 8  # Eval batch size (smaller due to multi-view)
   num_workers: 8
   pin_memory: true
   persistent_workers: true
@@ -70,24 +79,24 @@ augmentation:
     auto_augment: true
     random_erasing: 0.1
 
-  # No augmentation for val/test
+  # No augmentation for val/test (but use high-res canvas)
   val:
-    resize: 224
-    crop_size: 224
-    center_crop: true
+    # NOTE: Actual transform determined by preprocessing.eval_mode
+    # If eval_mode=letterbox_canvas: uses letterbox to eval_canvas_size
+    # If eval_mode=center_crop_224: uses legacy Resize(256) + CenterCrop(224)
+    center_crop: false  # Disabled when using letterbox
 
-# Multi-view settings
+# Multi-view settings (for validation/test only)
 multiview:
   enabled: true
-  global_crop:
-    size: 224
-    scale: [0.8, 1.0]
+  # With high-res canvas (e.g., 896×896), multi-view generates:
+  # - 1 global view (resized to 224×224)
+  # - N×N tiles (each 224×224) using roi_align
+  # Then aggregates logits using topk_mean or attention
 
-  local_crops:
-    enabled: true
-    num_crops: 9  # 3x3 grid
-    size: 75      # 224 / 3 (rounded)
-    scale: [0.3, 0.8]
+  grid_size: [3, 3]  # 3×3 = 9 tiles (can increase to [4, 4] or [5, 5] if VRAM allows)
+  overlap: 0.15  # 15% overlap between tiles (improves coverage)
+  content_aware_tiling: true  # Only tile content region (skip padding)
 
 # Slice-based evaluation
 slicing:

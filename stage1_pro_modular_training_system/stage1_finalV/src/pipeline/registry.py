@@ -28,11 +28,9 @@ class StepRegistry:
     # Dependency graph (step_name: set[dependency_names])
     _dependency_graph: Dict[str, frozenset[str]] = field(default_factory=dict)
 
-    def __post_init__(self):
-        """Initialize step catalog with lazy loading"""
-        # Lazy load step specs (only when needed)
-        # This avoids circular dependencies
-        if len(self._step_specs) == 0:  # ✅ Changed from or == to ==
+    def _ensure_discovered(self):
+        """Lazy load step specs (only when needed)"""
+        if len(self._step_specs) == 0:
             self._discover_steps()
 
     def _discover_steps(self):
@@ -48,9 +46,9 @@ class StepRegistry:
         print(f"🔍 Discovering Steps")
         print("=" * 70)
 
-        # Import step specs (absolute imports to avoid circular dependencies)
-        from src.steps.export_calib_logits import ExportCalibLogitsSpec
-        from src.steps.sweep_thresholds import SweepThresholdsSpec
+        # Import step specs (relative imports from steps package)
+        from steps.export_calib_logits import ExportCalibLogitsSpec
+        from steps.sweep_thresholds import SweepThresholdsSpec
 
         # Register steps
         self._step_specs = {
