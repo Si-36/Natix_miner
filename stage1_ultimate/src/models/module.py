@@ -406,20 +406,28 @@ class DINOv3Classifier(L.LightningModule):
         if dataloader_idx == 0:
             # val_select: For model selection (early stopping)
             self.val_metrics.update(logits, labels)
+
+            # CRITICAL FIX: Explicitly log val_select/acc for early stopping
+            # (MetricCollection logs as "val/acc", but config monitors "val_select/acc")
+            preds = torch.argmax(logits, dim=-1)
+            acc = (preds == labels).float().mean()
+
             self.log("val_select/loss", loss, on_step=False, on_epoch=True, prog_bar=True, add_dataloader_idx=False)
-            # Also log without prefix for compatibility with early stopping
+            self.log("val_select/acc", acc, on_step=False, on_epoch=True, prog_bar=True, add_dataloader_idx=False)
+
+            # Also log without prefix for compatibility
             self.log("val/loss", loss, on_step=False, on_epoch=True, prog_bar=False, add_dataloader_idx=False)
         else:
             # val_calib: For calibration (save logits!)
             self.log("val_calib/loss", loss, on_step=False, on_epoch=True, prog_bar=False, add_dataloader_idx=False)
 
-            # Store logits and labels for calibration (will save at epoch end)
-            if not hasattr(self, "val_calib_logits"):
-                self.val_calib_logits = []
-                self.val_calib_labels = []
-
-            self.val_calib_logits.append(logits.detach().cpu())
-            self.val_calib_labels.append(labels.detach().cpu())
+            # CRITICAL FIX: Return logits/labels so callback can reuse them
+            # (no extra forward pass needed in callback)
+            return {
+                "loss": loss,
+                "logits": logits.detach(),
+                "labels": labels.detach(),
+            }
 
         return loss
 
@@ -427,7 +435,10 @@ class DINOv3Classifier(L.LightningModule):
         """
         Called at the end of validation epoch
 
-        Log aggregated metrics and save val_calib logits/labels.
+        Log aggregated metrics (for val_select only).
+
+        NOTE: val_calib logits/labels are now handled by ValCalibArtifactSaver callback
+        (reuses validation_step outputs, no extra forward pass)
         """
         # Compute and log metrics (for val_select)
         metrics = self.val_metrics.compute()
@@ -435,26 +446,6 @@ class DINOv3Classifier(L.LightningModule):
 
         # Reset metrics
         self.val_metrics.reset()
-
-        # CRITICAL FIX: Save val_calib logits/labels for calibration
-        if hasattr(self, "val_calib_logits") and len(self.val_calib_logits) > 0:
-            import numpy as np
-
-            # Concatenate all batches
-            logits_array = torch.cat(self.val_calib_logits, dim=0).numpy()
-            labels_array = torch.cat(self.val_calib_labels, dim=0).numpy()
-
-            logger.info(
-                f"Collected val_calib: logits {logits_array.shape}, labels {labels_array.shape}"
-            )
-
-            # Store in module for access (will be saved by Phase 1 executor)
-            self.latest_val_calib_logits = logits_array
-            self.latest_val_calib_labels = labels_array
-
-            # Clear buffers
-            self.val_calib_logits = []
-            self.val_calib_labels = []
 
     def configure_optimizers(self) -> dict[str, Any]:
         """

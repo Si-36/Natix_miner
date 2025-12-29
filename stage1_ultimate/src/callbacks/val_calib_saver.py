@@ -89,6 +89,8 @@ class ValCalibArtifactSaver(Callback):
         """
         Collect logits/labels from val_calib batches
 
+        CRITICAL FIX: Reuses outputs from validation_step (no extra forward pass!)
+
         Called after each validation batch.
         Only collects from dataloader_idx=1 (val_calib).
         """
@@ -100,20 +102,18 @@ class ValCalibArtifactSaver(Callback):
         if trainer.global_rank != 0:
             return
 
-        # Get logits/labels from batch
-        images, labels = batch
+        # CRITICAL FIX: Reuse outputs from validation_step instead of re-computing
+        # validation_step now returns {"loss": ..., "logits": ..., "labels": ...} for val_calib
+        if not isinstance(outputs, dict) or "logits" not in outputs or "labels" not in outputs:
+            logger.warning(
+                f"val_calib outputs missing logits/labels (got {type(outputs)}). "
+                "Callback expects validation_step to return dict with 'logits' and 'labels'."
+            )
+            return
 
-        # Forward pass to get logits
-        # Use the same logic as validation_step (with EMA if enabled)
-        if hasattr(pl_module, "use_ema") and pl_module.use_ema and pl_module.ema is not None:
-            with pl_module.ema.average_parameters():
-                logits = pl_module.forward(images, use_multiview=pl_module.multiview is not None)
-        else:
-            logits = pl_module.forward(images, use_multiview=pl_module.multiview is not None)
-
-        # Accumulate in buffer (detached, on CPU)
-        self.logits_buffer.append(logits.detach().cpu())
-        self.labels_buffer.append(labels.detach().cpu())
+        # Accumulate in buffer (already detached, move to CPU)
+        self.logits_buffer.append(outputs["logits"].cpu())
+        self.labels_buffer.append(outputs["labels"].cpu())
 
     def on_validation_epoch_end(
         self, trainer: L.Trainer, pl_module: L.LightningModule
