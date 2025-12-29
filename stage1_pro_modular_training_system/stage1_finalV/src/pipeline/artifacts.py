@@ -80,6 +80,7 @@ class ArtifactStore:
         self.artifact_root = Path(artifact_root)
         self._hashes: Dict[str, str] = {}  # key -> hash cache
         self._manifest: Optional[Dict[str, Any]] = None  # Loaded manifest
+        self._manifest_path: Optional[Path] = None  # Path to loaded manifest
     
     def _get_key_path(self, key: ArtifactKey, run_id: str) -> Path:
         """

@@ -12,7 +12,7 @@
 #   - Config groups for easy swapping
 
 defaults:
-  - model: dinov2_vits  # Default model (can override with model=dinov2_vitb)
+  - model: dinov3_vith16  # FIXED: DINOv3 ViT-H/16 (was dinov2_vits)
   - training: baseline  # Default training config
   - data: natix        # Default dataset
   - calibration: temperature  # Default calibration method

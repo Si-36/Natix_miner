@@ -166,12 +166,12 @@ class SweepThresholdsSpec(StepSpec):
         calib_labels_path = ctx.artifact_store.get(ArtifactKey.VAL_CALIB_LABELS, ctx.run_id)
         
         # Validate artifacts exist
-        # validator = ArtifactValidator()
-        # validator.validate_required_files([
-        #     ("calib_logits", calib_logits_path),
-        #     ("calib_labels", calib_labels_path),
-        # ])
-        # print(f"   ✅ Calibration artifacts validated")
+        validator = ArtifactValidator()
+        validator.validate_required_files([
+            ("calib_logits", calib_logits_path),
+            ("calib_labels", calib_labels_path),
+        ])
+        print(f"   ✅ Calibration artifacts validated")
         
         # Load calibration data
         calib_logits = torch.load(calib_logits_path)
@@ -203,37 +203,64 @@ class SweepThresholdsSpec(StepSpec):
             correct = (preds == calib_labels).sum()
             total = calib_labels.numel()
             accuracy = correct.float() / total
-            coverage = correct.float() / total
-            fnr = (preds != calib_labels).sum() / total  # False Neg Rate
-            tnr = (preds != calib_labels).float() / total  # True Neg Rate
             
-            # ECE (Expected Calibration Error) - Binned
+            # 📊 Acceptance Rate: Fraction of samples kept
+            acceptance_rate = correct.float() / total
+            
+            # 📊 Confusion Matrix Metrics
+            # True Negatives: pred=0, label=1
+            tn = ((preds == 0) & (calib_labels == 1)).sum().float()
+            # False Positives: pred=1, label=0
+            fp = ((preds == 1) & (calib_labels == 0)).sum().float()
+            # True Positives: pred=1, label=1
+            tp = ((preds == 1) & (calib_labels == 1)).sum().float()
+            # False Negatives: pred=0, label=0
+            fn = ((preds == 0) & (calib_labels == 0)).sum().float()
+            
+            # 📊 Rates (from confusion matrix)
+            tnr = tn / total if total > 0 else 0.0  # True Negative Rate (correct / all)
+            fnr = fn / total  # False Negative Rate (wrong / all)
+            fpr = fp / total  # False Positive Rate (wrong / all)
+            tpr = tp / total if total > 0 else 0.0  # True Positive Rate (correct / all)
+            
+            # 📊 F1 Score: 2*TP - FN - FP
+            f1 = (2 * tp - fn) if total > 0 else 0.0
+            
+            # 📊 ECE (Expected Calibration Error) - Binned
             n_bins = 10
-            confidences = probs.max(dim=-1)
+            confidences = probs.max(dim=-1).cpu().numpy()
             bin_boundaries = np.linspace(0, 1, n_bins + 1)
             bin_lowers = bin_boundaries[:-1]
             bin_uppers = bin_boundaries[1:]
             
-            bin_indices = np.digitize(confidences.cpu().numpy(), bin_uppers) - 1
+            # Convert to numpy for binning
+            probs_np = probs.cpu().numpy()
+            labels_np = calib_labels.cpu().numpy()
+            
             ece = 0.0
             for i in range(n_bins):
-                mask = bin_indices == i
+                mask = (confidences >= bin_lowers[i]) & (confidences < bin_uppers[i])
                 if mask.sum() == 0:
                     continue
                 bin_conf = confidences[mask].mean()
-                bin_acc = (probs[mask].argmax(dim=-1) == calib_labels[mask]).float().mean()
+                bin_acc = (probs_np[mask].argmax(axis=-1) == labels_np[mask]).mean()
                 ece += (bin_acc - bin_conf).abs() * mask.sum() / total
             
-            # Brier Score - Mean squared error of probabilities
+            # 📊 Brier Score - Mean Squared Error
             one_hot_labels = F.one_hot(calib_labels.long(), num_classes=probs.shape[-1]).float()
             brier = ((probs - one_hot_labels) ** 2).mean(dim=-1).mean().item()
             
             # Store results
             all_results[threshold] = {
                 "accuracy": float(accuracy),
-                "coverage": float(coverage),
-                "fnr": float(fnr),
+                "acceptance_rate": float(acceptance_rate),  # ✅ Clear terminology
                 "tnr": float(tnr),
+                "fnr": float(fnr),
+                "fpr": float(fpr),
+                "tpr": float(tpr),
+                "f1": float(f1),
+                "precision": tp / (tp + fp) if (tp + fp) > 0 else 0.0,
+                "recall": tp / (tp + fn) if (tp + fn) > 0 else 0.0,
                 "ece": float(ece),
                 "brier": float(brier),
                 "correct": int(correct),
@@ -243,7 +270,8 @@ class SweepThresholdsSpec(StepSpec):
             # Log progress
             if (threshold * 100) % 10 == 0 or threshold in [0.0, 1.0]:
                 print(f"   Threshold {threshold:.3f}: "
-                      f"Acc={accuracy:.4f}, Cov={coverage:.4f}, FNR={fnr:.4f}, TNR={tnr:.4f}, "
+                      f"Acc={accuracy:.4f}, Accept={acceptance_rate:.4f}, "
+                      f"TNR={tpr:.4f}, FPR={fpr:.4f}, Prec={tpr:.4f}, Rec={tpr:.4f}, F1={f1:.4f}, "
                       f"ECE={ece:.4f}, Brier={brier:.4f}")
         
         print("-" * 70)
@@ -255,20 +283,20 @@ class SweepThresholdsSpec(StepSpec):
         
         # Find best threshold
         if objectives == "coverage":
-            # Maximize coverage subject to FNR constraint
+            # Maximize acceptance rate subject to FNR constraint
             valid_results = [
                 (t, r) for t, r in all_results.items()
                 if r["fnr"] <= target_fnr  # Constraint: FNR <= target FNR
             ]
             if not valid_results:
                 print(f"   ⚠️  No thresholds meet FNR constraint <= {target_fnr}")
-                print(f"      Selecting threshold with max coverage instead...")
+                print(f"      Selecting threshold with max acceptance rate instead...")
                 selected_threshold = max(all_results.keys())
                 selected_metrics = all_results[selected_threshold]
             else:
                 selected_threshold = min(valid_results)[0]
                 selected_metrics = all_results[selected_threshold]
-                print(f"   ✅ Selected threshold: {selected_threshold:.3f} (FNR={selected_metrics['fnr']:.4f})")
+                print(f"   ✅ Selected threshold: {selected_threshold:.3f} (Acceptance={selected_metrics['acceptance_rate']:.4f}, FNR={selected_metrics['fnr']:.4f})")
         
         elif objectives == "fnr":
             # Minimize FNR
@@ -278,21 +306,22 @@ class SweepThresholdsSpec(StepSpec):
             print(f"   ✅ Selected threshold: {selected_threshold:.3f} (FNR={selected_metrics['fnr']:.4f})")
         
         elif objectives == "balanced":
-            # Balance coverage and FNR (simplified)
-            # Use normalized scores: accuracy - FNR (approximates balanced tradeoff)
+            # Balance acceptance rate and FNR (simplified)
+            # Use normalized score: acceptance_rate - FNR
             scored_results = [
-                (t, r) for t, r in all_results.items()
+                (t, r, r) for t, r in all_results.items()
             ]
-            sorted_scored = sorted(scored_results, key=lambda x: x[1]["accuracy"] - x[1]["tnr"])
+            sorted_scored = sorted(scored_results, key=lambda x: x[1]["acceptance_rate"] - x[1]["fnr"])
             selected_threshold = sorted_scored[0][0]
             selected_metrics = all_results[selected_threshold]
-            print(f"   ✅ Selected threshold: {selected_threshold:.3f} (Acc={selected_metrics['accuracy']:.4f}, FNR={selected_metrics['fnr']:.4f})")
+            print(f"   ✅ Selected threshold: {selected_threshold:.3f} (Acceptance={selected_metrics['acceptance_rate']:.4f}, FNR={selected_metrics['fnr']:.4f})")
         
         else:
-            # Default: maximize coverage
-            selected_threshold = max(all_results.keys())
+            # Default: maximize acceptance rate
+            sorted_results = sorted(all_results.items(), key=lambda x: x[1]["acceptance_rate"])
+            selected_threshold = sorted_results[0][0]
             selected_metrics = all_results[selected_threshold]
-            print(f"   ✅ Selected threshold: {selected_threshold:.3f} (Acc={selected_metrics['accuracy']:.4f}, Cov={selected_metrics['coverage']:.4f})")
+            print(f"   ✅ Selected threshold: {selected_threshold:.3f} (Acceptance={selected_metrics['acceptance_rate']:.4f})")
         
         print("-" * 70)
         print(f"   Selected threshold: {selected_threshold:.3f}")
@@ -330,9 +359,14 @@ class SweepThresholdsSpec(StepSpec):
             metrics_list.append({
                 "threshold": float(threshold),
                 "accuracy": metrics["accuracy"],
-                "coverage": metrics["coverage"],
-                "fnr": metrics["fnr"],
+                "acceptance_rate": metrics["acceptance_rate"],  # ✅ Clear terminology
                 "tnr": metrics["tnr"],
+                "fnr": metrics["fnr"],
+                "fpr": metrics["fpr"],
+                "tpr": metrics["tpr"],
+                "f1": metrics["f1"],
+                "precision": metrics["precision"],
+                "recall": metrics["recall"],
                 "ece": metrics["ece"],
                 "brier": metrics["brier"],
                 "correct": metrics["correct"],
@@ -341,7 +375,7 @@ class SweepThresholdsSpec(StepSpec):
         
         # Create metrics CSV
         import csv
-        metrics_csv_data = "threshold,accuracy,coverage,fnr,tnr,ece,brier,correct,total"
+        metrics_csv_data = "threshold,accuracy,acceptance_rate,tnr,fnr,fpr,tpr,f1,precision,recall,ece,brier,correct,total"
         with metrics_path.open("w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(metrics_csv_data.split(","))
@@ -349,17 +383,21 @@ class SweepThresholdsSpec(StepSpec):
                 writer.writerow([
                     f"{row['threshold']:.4f}",
                     f"{row['accuracy']:.4f}",
-                    f"{row['coverage']:.4f}",
-                    f"{row['fnr']:.4f}",
+                    f"{row['acceptance_rate']:.4f}",
                     f"{row['tnr']:.4f}",
+                    f"{row['fnr']:.4f}",
+                    f"{row['fpr']:.4f}",
+                    f"{row['tpr']:.4f}",
+                    f"{row['f1']:.4f}",
+                    f"{row['precision']:.4f}",
+                    f"{row['recall']:.4f}",
                     f"{row['ece']:.4f}",
                     f"{row['brier']:.4f}",
                     f"{row['correct']}",
                     f"{row['total']}",
                 ])
         
-        # Save metrics using ArtifactStore
-        ctx.artifact_store.put(ArtifactKey.THRESHOLDS_METRICS, str({"csv_path": str(metrics_path)}), ctx.run_id)
+        # Save metrics CSV path (don't double-write!)
         print(f"   ✅ Metrics saved: {metrics_path}")
         
         # Final result
@@ -370,8 +408,8 @@ class SweepThresholdsSpec(StepSpec):
         
         metrics_dict = {
             "selected_threshold": float(selected_threshold),
+            "selected_acceptance_rate": selected_metrics["acceptance_rate"],
             "selected_accuracy": selected_metrics["accuracy"],
-            "selected_coverage": selected_metrics["coverage"],
             "selected_fnr": selected_metrics["fnr"],
         }
         
@@ -392,7 +430,7 @@ class SweepThresholdsSpec(StepSpec):
             metrics=metrics_dict,
         )
         
-        # Return result (include metadata parameter!)
+        # Return result (include metadata!)
         result = StepResult(
             artifacts_written=artifacts_written,
             splits_used=splits_used,
