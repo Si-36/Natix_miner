@@ -13,7 +13,7 @@ import sys
 from .step_api import StepSpec
 
 
-@dataclass
+    @dataclass
 class StepRegistry:
     """
     Step Registry (2026 PRO Standard).
@@ -23,16 +23,16 @@ class StepRegistry:
     """
     
     # Step catalog (step_name: StepSpec)
-    _step_specs: Optional[Dict[str, type[StepSpec]]] = field(default=None)
+    _step_specs: Dict[str, type[StepSpec]] = field(default_factory=dict)  # ✅ Changed from field(default=None)
     
     # Dependency graph (step_name: set[dependency_names])
-    _dependency_graph: Optional[Dict[str, frozenset[str]]] = field(default=None)
+    _dependency_graph: Dict[str, frozenset[str]] = field(default_factory=dict)  # ✅ Changed from field(default=None)
     
     def __post_init__(self):
         """Initialize step catalog with lazy loading"""
         # Lazy load step specs (only when needed)
         # This avoids circular dependencies
-        if self._step_specs is None or len(self._step_specs) == 0:
+        if len(self._step_specs) == 0:  # ✅ Changed from or == to ==
             self._discover_steps()
     
     def _discover_steps(self):
