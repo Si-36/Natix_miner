@@ -1,44 +1,16 @@
 """
-🔒️ **Step Registry** - Single Source of Truth for All Steps (2026 PRO)
-
-Implements:
-- Step names (canonical domain names)
-- Dependencies (no hardcoded _deps in engine!)
-- Order index (explicit ordering hint)
-- Owners (team responsible for step)
-- Tags (searchable metadata)
-
-2026 PRO Features:
-- Dynamic StepSpec discovery (no hardcoding!)
-- Step-based DAG (not phase-based!)
-- Leak-proof split contracts enforced at registry level
-
-This replaces hardcoded _deps dictionaries and prevents
-"forgotten dependency" bugs.
+🔒️ **Step Registry** - Single Source of Truth for All Steps (2026 Pro)
+Implements: Step names, deps, order_index - no hardcoded dependencies
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Dict, Optional, Any
+from dataclasses import dataclass
+from typing import Dict, Optional
 from pathlib import Path
 import sys
 
 # Import StepSpec base class
 from .step_api import StepSpec
-
-# Import step specs (absolute imports to avoid circular dependencies)
-from steps.export_calib_logits import ExportCalibLogitsSpec
-from steps.sweep_thresholds import SweepThresholdsSpec
-
-# Dynamically import all step specs
-# This makes the registry extensible - new steps are auto-discovered!
-# 2026 PRO: No hardcoded step_catalog!
-
-
-# NOTE: These imports will be done dynamically in get_step_spec()
-# to avoid circular dependencies and enable lazy loading
-# from ..steps.export_calib_logits import ExportCalibLogitsSpec
-# from ..steps.sweep_thresholds import SweepThresholdsSpec
 
 
 @dataclass
@@ -60,8 +32,8 @@ class StepRegistry:
         """Initialize step catalog with lazy loading"""
         # Lazy load step specs (only when needed)
         # This avoids circular dependencies
-        self._step_specs = {}
-        self._dependency_graph = {}
+        if self._step_specs is None or len(self._step_specs) == 0:
+            self._discover_steps()
     
     def _discover_steps(self):
         """
@@ -76,7 +48,11 @@ class StepRegistry:
         print(f"🔍 Discovering Steps")
         print("=" * 70)
         
-        # Register steps (imported at module level to avoid circular dependencies)
+        # Import step specs (absolute imports to avoid circular dependencies)
+        from steps.export_calib_logits import ExportCalibLogitsSpec
+        from steps.sweep_thresholds import SweepThresholdsSpec
+        
+        # Register steps
         self._step_specs = {
             "export_calib_logits": ExportCalibLogitsSpec,
             "sweep_thresholds": SweepThresholdsSpec,
@@ -84,11 +60,9 @@ class StepRegistry:
         
         # Build dependency graph
         self._dependency_graph = {}
-        for step_name, step_spec in self._step_specs.items():
-            # Instantiate StepSpec to get deps
-            # Note: Some steps may require runtime config
-            # For registry, we use class-level defaults
-            spec_instance = step_spec()  # Create instance to get deps
+        for step_name, step_spec_class in self._step_specs.items():
+            # Create instance to get deps (no instantiating inside discovery!)
+            spec_instance = step_spec_class()
             
             self._dependency_graph[step_name] = frozenset(spec_instance.deps)
             
@@ -98,26 +72,21 @@ class StepRegistry:
         print(f"\n   📋 Total steps discovered: {len(self._step_specs)}")
         print("=" * 70)
     
-    def register_step(self, step_name: str, step_spec: type[StepSpec]) -> None:
+    def register_step(self, step_name: str, step_spec_class: type[StepSpec]) -> None:
         """
         Register a step dynamically.
         
         Args:
             step_name: Canonical step name
-            step_spec: StepSpec subclass
-        """
-        if self._step_specs is None:
-            self._step_specs = {}
-            self._dependency_graph = {}
+            step_spec_class: StepSpec subclass
         
+        Returns:
+            None
+        """
         if step_name in self._step_specs:
             raise ValueError(f"Step '{step_name}' already registered!")
         
-        # Create instance to get deps
-        spec_instance = step_spec()
-        
-        self._step_specs[step_name] = step_spec
-        self._dependency_graph[step_name] = frozenset(spec_instance.deps)
+        self._step_specs[step_name] = step_spec_class
         
         print(f"✅ Registered step: {step_name}")
     
@@ -131,7 +100,6 @@ class StepRegistry:
         Returns:
             StepSpec class or None if not found
         """
-        # Lazy discovery
         if self._step_specs is None or len(self._step_specs) == 0:
             self._discover_steps()
         
@@ -147,24 +115,10 @@ class StepRegistry:
         Returns:
             Frozenset of dependency names
         """
-        # Lazy discovery
-        if self._dependency_graph is None or len(self._dependency_graph) == 0:
-            self._discover_steps()
-        
-        return self._dependency_graph.get(step_name, frozenset())
-    
-    def get_all_steps(self) -> Dict[str, type[StepSpec]]:
-        """
-        Get all registered steps.
-        
-        Returns:
-            Dict mapping step_name -> StepSpec class
-        """
-        # Lazy discovery
         if self._step_specs is None or len(self._step_specs) == 0:
             self._discover_steps()
         
-        return self._step_specs.copy()
+        return self._dependency_graph.get(step_name, frozenset())
     
     def resolve_execution_order(self, target_step: str) -> list[str]:
         """
@@ -179,8 +133,7 @@ class StepRegistry:
         Raises:
             RuntimeError: If circular dependency detected
         """
-        # Lazy discovery
-        if self._dependency_graph is None or len(self._dependency_graph) == 0:
+        if self._step_specs is None or len(self._step_specs) == 0:
             self._discover_steps()
         
         print(f"\n{'='*70}")

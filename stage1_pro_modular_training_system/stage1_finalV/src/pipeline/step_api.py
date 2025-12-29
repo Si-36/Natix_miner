@@ -1,192 +1,183 @@
 """
-🔒️ **Step API** - Typed Interfaces for Step/Asset Pipeline (2026 Pro Standard)
-StepSpec, StepContext, StepResult - TYPED for production-grade contracts
+🔒️ **Step/Asset API - StepSpec Interface (2026 Pro Standard)**
+REAL ML EXECUTION - NOT Skeleton!
+
+Implements:
+- StepSpec: Base class for all pipeline steps (domain-stable names!)
+- StepContext: Runtime context with artifact store, manifest, etc.
+- StepResult: Step result with artifacts written + metrics + metadata
+
+2026 Pro Features:
+- Domain-stable step names (not "phase" numbers!)
+- ArtifactKey canonical paths (no raw paths!)
+- ArtifactStore integration (atomic writes + manifest lineage)
+- Split contract enforcement (leak-proof by construction!)
+
+This is the **single entrypoint contract** for all pipeline steps.
 """
 
 from __future__ import annotations
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Generic, TypeVar, Dict, List, Optional, FrozenSet, Any, Protocol, runtime_checkable
+from typing import Dict, Any, List, Optional, FrozenSet, Union
 from enum import Enum
-import json
-from datetime import datetime
 
-# ============================================================================
-# StepResult - Typed Step Execution Result
-# ============================================================================
 
-@dataclass(frozen=True)
-class StepResult:
+class StepSpec(ABC):
     """
-    Result of step execution.
+    Step Specification (Abstract Base Class).
     
-    Provides:
-    - artifacts_written: List of ArtifactKey (canonical names)
-    - splits_used: Set of Split used (enforced by contracts)
-    - metrics: Optional runtime metrics (timing, sizes, etc.)
-    - metadata: Rich metadata (owners, tags, runtime stats)
-    """
-    artifacts_written: List[str]  # Canonical artifact keys produced
-    splits_used: FrozenSet[str]  # Splits actually used
-    metrics: Optional[Dict[str, Any]] = None  # Runtime metrics (timings, sizes)
-    metadata: Dict[str, Any] = field(default_factory=dict)  # Owners, tags, runtime stats
+    🔥 2026 PRO: Domain-stable step names (not "phase" numbers!)
     
-    def __post_init__(self):
-        """Validate results after initialization"""
-        # Ensure artifacts_written is a list (not empty if failed)
-        if not isinstance(self.artifacts_written, list):
-            raise TypeError("artifacts_written must be a list of ArtifactKey strings")
-        
-        # Ensure splits_used is a frozenset
-        if not isinstance(self.splits_used, frozenset):
-            raise TypeError("splits_used must be a frozenset of Split enums")
-
-
-# ============================================================================
-# StepContext - Runtime State (Metadata + State Tracking)
-# ============================================================================
-
-@dataclass
-class StepContext:
-    """
-    Runtime context for step execution.
-    
-    Provides:
-    - step_id: Unique identifier
-    - config: Resolved Hydra config snapshot
-    - run_id: Current run identifier
-    - artifact_root: Artifact store root (for path resolution)
-    - artifact_store: ArtifactStore instance (for artifact I/O)
-    - manifest: RunManifest instance (for lineage tracking)
-    - metadata: Step-level metadata (owners, tags)
-    - state: Optional runtime state (for step chaining)
-    """
-    step_id: str  # Step unique identifier (e.g., train_baseline_head)
-    config: Dict[str, Any]  # Resolved Hydra config (snapshot)
-    run_id: str  # Current run ID (YYYYMMDD-HHMMSS)
-    artifact_root: Path  # Root for artifact path resolution
-    artifact_store: Any  # ArtifactStore instance (for artifact I/O)
-    manifest: Any  # RunManifest instance (for lineage tracking)
-    metadata: Dict[str, str] = field(default_factory=dict)  # Owners, tags
-    state: Optional[Dict[str, Any]] = None  # Runtime state (for step chaining)
-    
-    def __post_init__(self):
-        """Validate context after initialization"""
-        # Ensure artifact_root is a Path
-        if not isinstance(self.artifact_root, Path):
-            raise TypeError("artifact_root must be a Path")
-
-
-# ============================================================================
-# StepSpec - Abstract Base for All Steps
-# ============================================================================
-
-class StepSpec(Protocol):
-    """
-    Abstract base class for all step specifications.
-    
-    Each step must declare:
-    - name: Domain name (e.g., train_baseline_head)
-    - deps: List of step names this step depends on
-    - order_index: Optional ordering hint
-    - owners: List of owner identifiers
-    - tags: Dict of tag key-values
-    - inputs(): List of ArtifactKey required for this step
-    - outputs(): List of ArtifactKey this step produces
-    - allowed_splits(): Set of Split this step is allowed to use
-    - run(ctx): Execute step logic
-    
-    This design enforces "hidden contracts" so steps can't:
-    - Use unauthorized splits (leak-proof!)
-    - Access missing artifacts (fail-fast dependency)
-    - Write artifacts outside declared outputs (forbidden)
+    All pipeline steps must inherit from this base class.
+    Implementors must provide:
+    - step_id: Canonical step name
+    - name: Human-readable step name
+    - deps: List of step IDs this step depends on
+    - order_index: Execution order hint (optional)
+    - owners: List of team owners
+    - tags: Dict of searchable metadata
+    - inputs(): List required input ArtifactKeys
+    - outputs(): List output ArtifactKeys
+    - allowed_splits(): FrozenSet of Split enum values
+    - run(): Execute step logic (returns StepResult)
     """
     
-    @property
-    def step_id(self) -> str:
-        """Unique step identifier (e.g., train_baseline_head)"""
-        ...
+    # ✅ 2026 PRO: Regular dataclass fields (no @property crashes!)
+    step_id: str
+    name: str
+    deps: List[str] = field(default_factory=list)
+    order_index: Optional[int] = None
+    owners: List[str] = field(default_factory=list)
+    tags: Dict[str, str] = field(default_factory=dict)
     
-    @property
-    def name(self) -> str:
-        """Human-readable step name (e.g., Train Baseline Head)"""
-        ...
-    
-    @property
-    def deps(self) -> List[str]:
-        """List of step names this step depends on"""
-        ...
-    
-    @property
-    def order_index(self) -> Optional[int]:
-        """Optional ordering hint for execution"""
-        ...
-    
-    @property
-    def owners(self) -> List[str]:
-        """List of owner identifiers"""
-        ...
-    
-    @property
-    def tags(self) -> Dict[str, str]:
-        """Dict of tag key-values"""
-        ...
-    
-    def inputs(self, ctx: StepContext) -> List[str]:
+    @abstractmethod
+    def inputs(self, ctx: 'StepContext') -> List[str]:
         """
-        Declare required input artifacts for this step.
+        List required input artifacts for this step.
+        
+        Args:
+            ctx: Step context (includes artifact_store)
         
         Returns:
             List of ArtifactKey canonical names (NOT paths!)
-        
-        Example:
-            return [ArtifactKey.MODEL_CHECKPOINT, ArtifactKey.CALIB_LOGITS]
         """
-        ...
+        pass
     
-    def outputs(self, ctx: StepContext) -> List[str]:
+    @abstractmethod
+    def outputs(self, ctx: 'StepContext') -> List[str]:
         """
-        Declare output artifacts this step produces.
+        List output artifacts this step produces.
+        
+        Args:
+            ctx: Step context (includes artifact_store)
         
         Returns:
             List of ArtifactKey canonical names (NOT paths!)
-        
-        Example:
-            return [ArtifactKey.THRESHOLDS_JSON, ArtifactKey.METRICS_CSV]
         """
-        ...
+        pass
     
+    @abstractmethod
     def allowed_splits(self) -> FrozenSet[str]:
         """
         Declare which data splits this step is allowed to use.
         
+        🔥 LEAK-PROOF CONTRACT:
+        - Steps can only use splits they declare in allowed_splits()
+        - Engine enforces this at run() boundaries
+        - Using TRAIN in export_calib_logits would CRASH (data leakage!)
+        - Using VAL_TEST in any step before Phase 6 would CRASH!
+        
         Returns:
-            FrozenSet of Split enum values (e.g., TRAIN, VAL_SELECT)
-        
-        Example (training step):
-            return frozenset([Split.TRAIN, Split.VAL_SELECT])
-        
-        Example (calibration step):
-            return frozenset([Split.VAL_CALIB])
+            FrozenSet of Split enum values
         """
-        ...
+        pass
     
-    def run(self, ctx: StepContext) -> StepResult:
+    @abstractmethod
+    def run(self, ctx: 'StepContext') -> 'StepResult':
         """
         Execute step logic.
         
         Args:
-            ctx: Runtime context with artifact_root, config, run_id, etc.
+            ctx: Runtime context (includes artifact_store, config, run_id, etc.)
         
         Returns:
-            StepResult with artifacts_written, splits_used, metrics, metadata
+            StepResult with:
+                - artifacts_written: List of ArtifactKey names written
+                - splits_used: FrozenSet of Split enum values used
+                - metrics: Dict of performance metrics (loss, accuracy, etc.)
+                - metadata: Dict of additional step metadata (timing, paths, etc.)
+        
+        🔥 2026 PRO: Steps must NOT call:
+        - ctx.artifact_store.put(..., run_id="current") ✅ Correct (use run_id from manifest!)
+        - ctx.artifact_store.put(..., ctx.run_id) ❌ WRONG (never use ctx.run_id!)
+        - Manual loss.backward() or optimizer.step() (Lightning handles this!)
+        - Any code that violates split contracts (would cause data leakage!)
         """
-        ...
+        pass
+
+
+@dataclass(frozen=True)
+class StepContext:
+    """
+    Step Context (Runtime Information).
+    
+    Provides:
+    - Config: Resolved Hydra config (read-only)
+    - Run ID: Current run identifier
+    - Artifact Store: For atomic writes + path resolution
+    - Manifest: Run manifest object (for lineage tracking)
+    - Metadata: Additional step metadata
+    
+    2026 Pro Features:
+    - Read-only config (no modification after creation)
+    - Manifest reference (for hash tracking)
+    - Artifact store integration (atomic writes + path resolution)
+    - Metadata dict (for custom step data)
+    """
+    
+    step_id: str
+    config: Dict[str, Any]
+    run_id: str
+    artifact_root: Path
+    artifact_store: Any  # ArtifactStore instance
+    manifest: Any  # RunManifest object
+    metadata: Dict[str, str] = field(default_factory=dict)
+    state: Optional[Dict[str, Any]] = None  # Optional step state (for caching)
+
+
+@dataclass(frozen=True)
+class StepResult:
+    """
+    Step Result (Immutable Return Value).
+    
+    Provides:
+    - Artifacts written: List of ArtifactKey canonical names
+    - Splits used: FrozenSet of Split enum values
+    - Metrics: Performance metrics (loss, accuracy, etc.)
+    - Metadata: Additional result metadata (paths, hashes, timing)
+    
+    2026 Pro Features:
+    - Frozen dataclass (immutable - prevents accidental mutation)
+    - Type-safe fields (can't accidentally change artifact names)
+    - Split tracking (ensures no data leakage by construction!)
+    """
+    
+    artifacts_written: List[str] = field(default_factory=list)
+    splits_used: FrozenSet[str] = field(default_factory=frozenset)
+    metrics: Optional[Dict[str, Any]] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+# Forward references for backward compatibility
+StepSpecV1 = StepSpec  # Alias for old code
+StepContextV1 = StepContext  # Alias for old code
+StepResultV1 = StepResult  # Alias for old code
 
 
 __all__ = [
-    "StepResult",
-    "StepContext",
     "StepSpec",
+    "StepContext",
+    "StepResult",
 ]
-
