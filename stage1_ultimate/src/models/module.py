@@ -150,9 +150,9 @@ class DINOv3Classifier(L.LightningModule):
     - Comprehensive metrics
 
     Args:
-        backbone_name: DINOv3 variant (vit_huge, vit_giant, etc.)
+        backbone_name: DINOv3 HuggingFace model ID or local checkpoint path
+                      (e.g., "facebook/dinov3-vith16-pretrain-lvd1689m")
         num_classes: Number of output classes (13 for NATIX)
-        pretrained_path: Path to local DINOv3 checkpoint
         freeze_backbone: If True, freeze backbone weights
         head_type: Type of classification head ("linear" or "doran")
         dropout_rate: Dropout probability (0.3 recommended)
@@ -168,9 +168,8 @@ class DINOv3Classifier(L.LightningModule):
 
     Example:
         >>> model = DINOv3Classifier(
-        ...     backbone_name="vit_huge",
+        ...     backbone_name="facebook/dinov3-vith16-pretrain-lvd1689m",
         ...     num_classes=13,
-        ...     pretrained_path="/path/to/dinov3",
         ...     freeze_backbone=True,
         ...     learning_rate=1e-4
         ... )
@@ -180,9 +179,8 @@ class DINOv3Classifier(L.LightningModule):
 
     def __init__(
         self,
-        backbone_name: str = "vit_huge",
+        backbone_name: str = "facebook/dinov3-vith16-pretrain-lvd1689m",
         num_classes: int = 13,
-        pretrained_path: Optional[str] = None,
         freeze_backbone: bool = True,
         head_type: str = "linear",
         dropout_rate: float = 0.3,
@@ -204,7 +202,6 @@ class DINOv3Classifier(L.LightningModule):
         # Model architecture - CRITICAL: Use ModuleDict for clean EMA scope
         backbone = create_dinov3_backbone(
             model_name=backbone_name,
-            pretrained_path=pretrained_path,
             freeze=freeze_backbone,
         )
 
@@ -553,11 +550,10 @@ if __name__ == "__main__":
     # Test Lightning Module
     print("Testing DINOv3Classifier...")
 
-    # Create model (without pretrained weights for testing)
+    # Create model (will load from HuggingFace)
     model = DINOv3Classifier(
-        backbone_name="vit_huge",
+        backbone_name="facebook/dinov3-vith16-pretrain-lvd1689m",
         num_classes=13,
-        pretrained_path=None,  # Will try to load from HuggingFace
         freeze_backbone=True,
         head_type="linear",
         learning_rate=1e-4,

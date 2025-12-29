@@ -1,25 +1,47 @@
 # ============================================================================
-# Main Hydra Config - Composition via Defaults List (Professional Way)
+# Main Hydra Config - Step-Based Composition (2026 Pro Standard)
 # ============================================================================
-# Implements TODO 127: Main config using defaults list composition
+# Implements: Step/Asset Pipeline Model (NO "phase" terminology!)
+#
+# Uses:
+# - Step names: train_baseline_head, export_calib_logits, sweep_thresholds
+# - Step configs: configs/step/*.yaml
+# - Step registry: src/pipeline/registry.py
 # ============================================================================
 
 defaults:
-  # Base config with paths, reproducibility
+  # Base config with paths, reproducibility, model config
   - base
   
-  # Phase selection (default to Phase 1)
-  - phase: phase1
+  # Step selection (default: train_baseline_head)
+  - step: train_baseline_head
   
   # Allow CLI overrides
   - _self_
 
 # ============================================================================
-# CLI Override Target (Hydra best practice)
+# CLI Override Target (Hydra Best Practice)
 # ============================================================================
 
 run:
-  run_id: null              # Auto-generated if null
-  target_phase: 1            # Phase to run (1=Train, 2=Thresholds, 3=Gate, 6=Export)
-  skip_existing: true         # Skip phases if outputs exist (for CI)
+  run_id: null  # Auto-generated if null
+  target_step: train_baseline_head  # Step to run
+  skip_existing: true  # Skip steps if outputs exist (for CI)
 
+# ============================================================================
+# Pipeline Configuration
+# ============================================================================
+
+pipeline:
+  artifact_root: ${oc.env:ARTIFACT_ROOT,./artifacts}
+  run_root: ${oc.env:RUN_ROOT,./runs}
+  enable_atomic_writes: true  # Atomic writes with os.fsync
+  enable_manifest_tracking: true  # Track lineage via RunManifest
+
+# ============================================================================
+# Step Dependencies (DAG - Controlled by Registry)
+# ============================================================================
+# Steps declare their deps in StepSpec.deps
+# DAG engine resolves execution order automatically
+# DO NOT HARDCODE ORDER HERE - use registry!
+# ============================================================================

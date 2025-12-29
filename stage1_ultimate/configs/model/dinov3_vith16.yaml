@@ -1,11 +1,11 @@
 # DINOv3 ViT-H/16 Configuration (2025-12-29 Production)
 # Latest 2025-2026 Practices
 #
-# DINOv3 ViT-H/16:
+# DINOv3 ViT-H/16 Plus:
 #   - Hidden size: 1280
 #   - Patch size: 16
-#   - Image size: 518 (recommended)
-#   - Pretrained on LVD-142M dataset
+#   - Image size: 224 (standard DINOv3 resolution)
+#   - Pretrained on LVD-1689M dataset
 #
 # Expected results with ExPLoRA:
 #   - Accuracy: 85-92% (roadwork classification)
@@ -13,7 +13,7 @@
 #   - AUROC: 0.94-0.96
 
 # Model architecture
-backbone_id: facebook/dinov3-vith16-pretrain-lvd1689m  # HuggingFace model ID
+backbone_id: facebook/dinov3-vith16plus-pretrain-lvd1689m  # HuggingFace model ID (ViT-H/16 Plus)
 num_classes: 13  # NATIX roadwork (13 classes, NOT 7!)
 
 # Backbone settings

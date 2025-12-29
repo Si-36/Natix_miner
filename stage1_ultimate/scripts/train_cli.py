@@ -113,9 +113,8 @@ def register_phase_executors(engine: DAGEngine) -> None:
 
         # Create model (FIXED: use real HF model ID)
         model = DINOv3Classifier(
-            backbone_name=DINOV3_MODEL,  # FIXED: Real HF ID, NOT "vit_huge"
+            backbone_name=DINOV3_MODEL,  # HF model ID (backbone factory handles loading)
             num_classes=13,
-            pretrained_path=None,  # FIXED: model_name IS the pretrained path
             freeze_backbone=True,
             head_type="linear",
             dropout_rate=0.3,
