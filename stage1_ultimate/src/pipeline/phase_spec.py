@@ -314,25 +314,27 @@ def create_phase4_spec() -> PhaseSpec:
 
 
 def create_phase5_spec() -> PhaseSpec:
-    """Phase 5: SCRC Calibration"""
+    """Phase 5: SCRC Calibration (Temperature Scaling)"""
     return PhaseSpec(
         phase_type=PhaseType.PHASE5_SCRC,
         name="Phase 5: SCRC Calibration",
         description=(
-            "Fit SCRC calibration parameters on val_calib.\nOutputs: SCRC parameters JSON."
+            "Fit SCRC calibration parameters (temperature scaling) on val_calib.\n"
+            "FIXED (2025-12-29): Only needs val_calib logits/labels (no checkpoint).\n"
+            "Outputs: SCRC parameters JSON."
         ),
         dependencies=[PhaseType.PHASE1_BASELINE],
-        input_artifacts=["phase1_checkpoint", "val_calib_logits"],
+        input_artifacts=["val_calib_logits", "val_calib_labels"],  # FIXED: no checkpoint needed
         output_artifacts=["scrcparams_json"],
         required_splits={Split.VAL_CALIB},
         allowed_splits={Split.VAL_CALIB},  # ONLY val_calib
         execution_mode=ExecutionMode.POLICY_FITTING,
         resources=ResourceRequirements(
-            requires_gpu=True,
-            min_gpu_memory_gb=16.0,
-            min_cpu_memory_gb=32.0,
-            estimated_time_minutes=30.0,  # 30 minutes
-            num_gpus=1,
+            requires_gpu=False,  # FIXED: CPU-only (LBFGS optimization)
+            min_gpu_memory_gb=0.0,
+            min_cpu_memory_gb=8.0,  # FIXED: reduced (small tensors)
+            estimated_time_minutes=5.0,  # FIXED: very fast (LBFGS converges quickly)
+            num_gpus=0,
             distributed=False,
         ),
         validators=[],

@@ -424,7 +424,8 @@ class ArtifactSchema:
         elif phase == 4:
             return []  # ExPLoRA pretraining needs no inputs
         elif phase == 5:
-            return [self.phase3_checkpoint, self.val_calib_logits]
+            # FIXED (2025-12-29): SCRC only needs val_calib logits/labels (no checkpoint)
+            return [self.val_calib_logits, self.val_calib_labels]
         elif phase == 6:
             # Bundle needs EXACTLY ONE policy file (mutual exclusivity)
             return [self.phase1_checkpoint, self.splits_json]
