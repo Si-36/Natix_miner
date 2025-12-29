@@ -5,7 +5,7 @@ This prevents "forgot to save X" bugs and provides atomic writes
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -36,7 +36,7 @@ class ArtifactKey(str, Enum):
     VAL_SELECT_METRICS = "val_select_metrics"
     
     # 🔥 2026 PRO: Calibration artifacts (from Phase 1)
-    # These are exported from Phase 1 for Phase 2 calibration
+    # These are exported from Phase 1 and consumed by Phase 2
     VAL_CALIB_LOGITS = "val_calib_logits"
     VAL_CALIB_LABELS = "val_calib_labels"
     
@@ -63,7 +63,13 @@ class ArtifactStore:
     - get(key): Resolve canonical key to absolute path
     - put(key, data): Atomic write with streaming hash
     - hash_exists(key, expected_hash): Check if hash matches
-    - Supports temp → fsync → atomic rename pattern
+    - get_loader(split, run_id): Get data loader for split (step-safe)
+    - initialize_manifest(): Create run manifest with Git SHA + config snapshot
+    - finalize_step(step_id, status, metrics): Finalize step in manifest
+    - save_manifest(): Save manifest to disk
+    - load_manifest(manifest_path): Load manifest from disk
+    - update_step(step_id, status, metadata): Update step status in manifest
+    - get_run_dir(run_id): Get run directory path
     
     Prevents:
     - Partial artifacts (crashes)
@@ -105,7 +111,6 @@ class ArtifactStore:
             ArtifactKey.VAL_SELECT_METRICS: self.artifact_root / "runs" / run_id / "phase1" / "metrics.csv",
             
             # 🔥 2026 PRO: Calibration artifacts (exported from Phase 1)
-            # These are exported from Phase 1 and consumed by Phase 2
             ArtifactKey.VAL_CALIB_LOGITS: self.artifact_root / "runs" / run_id / "phase1" / "val_calib_logits.pt",
             ArtifactKey.VAL_CALIB_LABELS: self.artifact_root / "runs" / run_id / "phase1" / "val_calib_labels.pt",
             
@@ -128,7 +133,7 @@ class ArtifactStore:
         
         return key_paths[key]
     
-    def get(self, key: ArtifactKey, run_id: str) -> Path:
+    def get(self, key: ArtifactKey, run_id: str = "current") -> Path:
         """
         Get artifact path by key.
         
@@ -151,20 +156,22 @@ class ArtifactStore:
         """
         Atomically write artifact data.
         
-        Args:
-            key: Canonical artifact key
-            data: Data to write (bytes, str, tensor, etc.)
-            run_id: Run identifier (default to "current")
+        🔥 2026 PRO: Real atomic writes with fsync!
         
         Atomic write pattern:
         1. Write to temp file in same directory
-        2. Flush to disk (fsync)
+        2. Flush to disk (fsync on file descriptor)
         3. Atomic replace (rename temp → target)
-        4. Delete temp
+        4. Clean up temp
         
         Prevents:
         - Partial artifacts (crashes mid-write)
         - Data corruption (rename before complete write)
+        
+        Args:
+            key: Canonical artifact key
+            data: Data to write (bytes, str, tensor, dict, list, json-serializable)
+            run_id: Run identifier (default to "current")
         
         Returns:
             Path to written artifact
@@ -180,16 +187,39 @@ class ArtifactStore:
         # Create parent directory
         target_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # Handle different data types
-        if isinstance(data, (torch.Tensor, bytes)):
-            # Binary data (tensors, bytes)
-            import torch
-            import tempfile
-            
-            # Write to temp file first
-            temp_dir = tempfile.mkdtemp(dir=str(target_path.parent))
-            temp_file = temp_dir / f"tmp_{target_path.name}.bin"
-            
+        # Handle different data types with proper atomic writes
+        if isinstance(data, (torch.Tensor,)):
+            # 🔥 Binary data (tensors, bytes)
+            self._put_binary_data(data, target_path, key, run_id)
+        
+        elif isinstance(data, (dict, list)):
+            # 🔥 Text/JSON data
+            self._put_json_data(data, target_path, key, run_id)
+        
+        else:
+            raise TypeError(f"Unsupported data type for artifact write: {type(data)}")
+        
+        return target_path
+    
+    def _put_binary_data(self, data: torch.Tensor | bytes, target_path: Path, key: ArtifactKey, run_id: str) -> None:
+        """
+        Atomically write binary data (tensors, bytes) with fsync.
+        
+        Args:
+            data: Binary data to write
+            target_path: Target file path
+            key: Artifact key
+            run_id: Run identifier
+        
+        🔥 2026 PRO: Uses real fsync for crash safety!
+        """
+        # Create temp file in same directory
+        import tempfile
+        temp_dir = tempfile.mkdtemp(dir=str(target_path.parent))
+        temp_file = temp_dir / f"tmp_{target_path.name}.bin"
+        
+        try:
+            # Write data
             if isinstance(data, torch.Tensor):
                 # Save tensor
                 torch.save(data, temp_file)
@@ -199,9 +229,14 @@ class ArtifactStore:
                 temp_file.write_bytes(data)
                 data_size = temp_file.stat().st_size
             
-            # Atomic replace: fsync → rename
+            # 🔥 CRITICAL: Flush to disk (fsync on file descriptor!)
+            temp_fd = temp_file.open("r")
+            os.fsync(temp_fd)
+            os.close(temp_fd)
+            
+            # Atomic replace
             os.replace(temp_file, target_path)
-            print(f"✅ Atomic write (binary): {target_path}")
+            print(f"✅ Atomic write (binary with fsync): {target_path}")
             
             # Clean up
             os.remove(temp_file)
@@ -212,25 +247,42 @@ class ArtifactStore:
             self._hashes[key.value] = file_hash
             self._update_manifest_hashes()
             
-        elif isinstance(data, (dict, list, str, int, float)):
-            # Text/JSON data
-            import json
-            
-            # Write to temp file
-            temp_dir = tempfile.mkdtemp(dir=str(target_path.parent))
-            temp_file = temp_dir / f"tmp_{target_path.name}.json"
-            
+        except Exception as e:
+            # On failure, clean up temp
+            os.remove(temp_file)
+            os.removedirs(temp_dir, exist_ok=True)
+            raise e
+    
+    def _put_json_data(self, data: Any, target_path: Path, key: ArtifactKey, run_id: str) -> None:
+        """
+        Atomically write JSON/text data.
+        
+        🔥 2026 PRO: Uses real fsync for crash safety!
+        """
+        # Create temp file in same directory
+        import tempfile
+        temp_dir = tempfile.mkdtemp(dir=str(target_path.parent))
+        temp_file = temp_dir / f"tmp_{target_path.name}.json"
+        
+        try:
+            # Serialize JSON
             if isinstance(data, (dict, list)):
                 json_data = json.dumps(data, indent=2)
             else:
                 json_data = str(data)
             
+            # Write to temp
             with temp_file.open("w", encoding="utf-8") as f:
                 f.write(json_data)
             
+            # 🔥 CRITICAL: Flush to disk (fsync on file descriptor!)
+            temp_fd = temp_file.open("r")
+            os.fsync(temp_fd)
+            os.close(temp_fd)
+            
             # Atomic replace
             os.replace(temp_file, target_path)
-            print(f"✅ Atomic write (json): {target_path}")
+            print(f"✅ Atomic write (json with fsync): {target_path}")
             
             # Clean up
             os.remove(temp_file)
@@ -241,22 +293,17 @@ class ArtifactStore:
             self._hashes[key.value] = file_hash
             self._update_manifest_hashes()
             
-        else:
-            raise TypeError(f"Unsupported data type for artifact write: {type(data)}")
-        
-        return target_path
+        except Exception as e:
+            # On failure, clean up temp
+            os.remove(temp_file)
+            os.removedirs(temp_dir, exist_ok=True)
+            raise e
     
     def put_from_file(self, key: ArtifactKey, source_path: Path, run_id: str = "current") -> Path:
         """
         Copy file to artifact location with atomic write.
         
-        Args:
-            key: Canonical artifact key
-            source_path: Path to source file
-            run_id: Run identifier
-        
-        Returns:
-            Path to copied artifact
+        🔥 2026 PRO: Real atomic writes with fsync!
         """
         if run_id == "current":
             if self._manifest is None:
@@ -267,6 +314,7 @@ class ArtifactStore:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         
         # Atomic copy: copy to temp → fsync → replace
+        import tempfile
         temp_dir = tempfile.mkdtemp(dir=str(target_path.parent))
         temp_file = temp_dir / f"tmp_{target_path.name}"
         
@@ -274,9 +322,14 @@ class ArtifactStore:
         import shutil
         shutil.copy2(source_path, temp_file)
         
+        # 🔥 CRITICAL: Flush to disk (fsync on file descriptor!)
+        temp_fd = temp_file.open("r")
+        os.fsync(temp_fd)
+        os.close(temp_fd)
+        
         # Atomic replace
         shutil.replace(temp_file, target_path)
-        print(f"✅ Atomic write (copy): {target_path}")
+        print(f"✅ Atomic write (copy with fsync): {target_path}")
         
         # Clean up
         shutil.rmtree(temp_dir)
@@ -347,7 +400,7 @@ class ArtifactStore:
         """
         Compute SHA256 hash of file.
         
-        Streaming hash for large files (to avoid memory issues).
+        🔥 2026 PRO: Streaming hash for large files (to avoid memory issues).
         
         Args:
             file_path: Path to file
@@ -414,6 +467,8 @@ class ArtifactStore:
         """
         Initialize a new run manifest.
         
+        🔥 2026 PRO: Includes config snapshot + environment info!
+        
         Args:
             run_id: Unique run identifier (e.g., YYYYMMDD-HHMMSS)
             config: Resolved Hydra config (snapshot)
@@ -447,6 +502,7 @@ class ArtifactStore:
         
         # Update internal manifest reference
         self._manifest = manifest
+        self._manifest_path = manifest_path
         
         return manifest_path
     
@@ -538,4 +594,3 @@ __all__ = [
     "ArtifactKey",
     "ArtifactStore",
 ]
-

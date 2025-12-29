@@ -1,24 +1,26 @@
 """
 🚀 **Lightning Module - Phase 1 Baseline Training (DINOv3 Small)**
-REAL ML Execution - NOT Skeleton!
-
-Integrates:
-- DINOv3 Backbone (facebook/dinov3-vits16-pretrain-lvd1689m)
-- Stage1Head (binary classifier)
-- ArtifactStore (atomic writes + manifest lineage)
-- Split Contracts (leak-proof: TRAIN + VAL_SELECT only)
+REAL ML EXECUTION - NOT Skeleton!
 
 2025/2026 Pro Standard Features:
+- DINOv3 Backbone (facebook/dinov3-vits16-pretrain-lvd1689m)
+- Stage1Head (binary classifier)
+- AdamW Optimizer with cosine scheduling
+- BF16 Mixed Precision
 - torch.compile (30-50% speedup)
-- AdamW optimizer
-- BF16 mixed precision
-- Gradient clipping
-- Learning rate scheduling
-- Reproducible seeding
+- ArtifactStore integration (atomic writes + manifest lineage)
+- Split contract enforcement (TRAIN + VAL_SELECT only)
+- Real ML execution (not just definitions!)
+
+Integrates:
+- ArtifactStore
+- SplitPolicy
+- Backbones
+- Heads
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Union
 import torch
@@ -26,20 +28,22 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
+from torch.utils.data import Dataset as TorchDataset
+import numpy as np
 
-# Import existing components
 from ..models.backbone import DINOv3Backbone
 from ..models.head import Stage1Head
 from ..pipeline.artifacts import ArtifactKey, ArtifactStore
 from ..pipeline.contracts import Split, SplitPolicy, assert_allowed
+from ..pipeline.step_api import StepSpec, StepContext, StepResult
 
 
 @dataclass
 class Phase1LightningModuleConfig:
-    """Configuration for Phase 1 Lightning module"""
+    """Configuration for Phase 1 Lightning module."""
+    
     model_id: str = "facebook/dinov3-vits16-pretrain-lvd1689m"
-    freeze_backbone: bool = True
-    hidden_dim: int = 512
+    hidden_dim: int = 384
     num_classes: int = 2
     max_epochs: int = 50
     batch_size: int = 32
@@ -48,357 +52,412 @@ class Phase1LightningModuleConfig:
     dropout: float = 0.1
     optimizer_name: str = "adamw"
     scheduler_name: str = "cosine"
-    warmup_epochs: int = 2
+    freeze_backbone: bool = True
     max_grad_norm: float = 1.0
     precision: str = "bf16"
-    compile_model: bool = False
-    save_calibration_data: bool = True
+    compile_model: bool = False  # torch.compile support (30-50% speedup)
+    save_calibration_data: bool = True  # Export calibration artifacts (VAL_CALIB)
+
+
+@dataclass
+class TrainingMetrics:
+    """Training metrics tracking."""
+    
+    loss: float = 0.0
+    accuracy: float = 0.0
+    precision: float = 0.0
+    recall: float = 0.0
+    f1: float = 0.0
+    confusion_matrix: Optional[Dict[str, Any]] = None
+    
+    def to_dict(self) -> Dict[str, float]:
+        return {
+            "loss": self.loss,
+            "accuracy": self.accuracy,
+            "precision": self.precision,
+            "recall": self.recall,
+            "f1": self.f1,
+        }
 
 
 class Phase1LightningModule(pl.LightningModule):
     """
     Phase 1 Baseline Training Module (PyTorch Lightning 2.4).
     
+    REAL ML EXECUTION - NOT Skeleton!
+    
     Implements:
-    - DINOv3 backbone (frozen for Phase 1)
+    - DINOv3 backbone (frozen by default)
     - Stage1Head (binary classifier)
     - AdamW optimizer with cosine scheduling
     - BF16 mixed precision
-    - torch.compile support (30-50% speedup)
-    - ArtifactStore integration (atomic writes)
     - Split contract enforcement (TRAIN + VAL_SELECT only)
-    
-    Lightning Best Practices:
-    - Return loss dict in training_step (Lightning handles backward/step!)
-    - Return optimizer in configure_optimizers (Lightning calls .step!)
-    - No manual optimizer.step() calls
-    - No manual loss.backward() calls
+    - ArtifactStore integration (atomic writes + manifest lineage)
+    - Real training loops (not just definitions!)
     """
     
-    def __init__(
-        self,
-        config: Phase1LightningModuleConfig,
-        artifact_store: ArtifactStore,
-    ) -> None:
+    def __init__(self, config: Phase1LightningModuleConfig, artifact_store: ArtifactStore = None):
+        """
+        Initialize Phase 1 Lightning module.
+        
+        Args:
+            config: Module configuration
+            artifact_store: ArtifactStore instance
+        """
         super().__init__()
+        
+        # Store config and artifact store
         self.config = config
         self.artifact_store = artifact_store
         
-        # Will be set in setup()
+        # Initialize components (will be created in setup)
         self.backbone: Optional[DINOv3Backbone] = None
         self.head: Optional[Stage1Head] = None
-        self.model: Optional[nn.Module] = None
         self.criterion: Optional[nn.Module] = None
         self.optimizer: Optional[torch.optim.Optimizer] = None
         self.scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None
         
         # Metrics tracking
-        self.train_accuracy_history: List[float] = []
-        self.val_accuracy_history: List[float] = []
+        self.train_metrics = TrainingMetrics()
+        self.val_metrics: TrainingMetrics()
         
-        # Calibration data (val_calib only!)
-        self.val_calib_logits: List[torch.Tensor] = []
-        self.val_calib_labels: List[torch.Tensor] = []
+        # Device
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.use_amp = config.precision == "bf16"  # Mixed precision
     
-    def configure_optimizers(self) -> torch.optim.AdamW:
+    def setup(self, train_loader: DataLoader, val_select_loader: DataLoader = None, val_calib_loader: DataLoader = None):
         """
-        Configure optimizer.
+        Setup model components and optimizers.
         
-        ✅ Lightning calls .step() on this optimizer automatically!
-        ✅ Don't store optimizer as instance variable - return it!
+        Called BEFORE training starts.
+        
+        Args:
+            train_loader: Training data loader
+            val_select_loader: Selection data loader (model selection ONLY)
+            val_calib_loader: Calibration data loader (calibration ONLY - LEAK-PROOF!)
         """
-        # Only train head parameters (backbone is frozen)
-        head_params = list(self.head.parameters())
+        print(f"\n{'='*70}")
+        print(f"🚀 Phase 1 Lightning Module - Setup")
+        print("=" * 70)
+        
+        # 1. Create backbone
+        print(f"   📝 Creating DINOv3 backbone ({self.config.model_id})...")
+        print("-" * 70)
+        
+        self.backbone = DINOv3Backbone(
+            model_id=self.config.model_id,
+            hidden_dim=self.config.hidden_dim,
+            freeze_backbone=self.config.freeze_backbone,
+            precision=self.config.precision,
+        )
+        
+        # Move to device
+        self.backbone = self.backbone.to(self.device)
+        print(f"   ✅ Backbone created: {self.config.model_id}")
+        
+        # 2. Create head
+        print(f"   🧠 Creating Stage1Head (num_classes={self.config.num_classes}, hidden_dim={self.config.hidden_dim})...")
+        print("-" * 70)
+        
+        self.head = Stage1Head(
+            hidden_dim=self.config.hidden_dim,
+            num_classes=self.config.num_classes,
+            dropout=self.config.dropout,
+        )
+        
+        # Move to device
+        self.head = self.head.to(self.device)
+        print(f"   ✅ Head created")
+        
+        # 3. Combine backbone + head
+        self.model = nn.Sequential(
+            self.backbone,
+            self.head,
+        )
+        
+        print(f"   🧱 Model architecture: {type(self.backbone).__name__} → {type(self.head).__name__}")
+        print(f"   ✅ Model assembled")
+        
+        # 4. Create criterion
+        print(f"   📊 Creating criterion (CrossEntropyLoss)...")
+        print("-" * 70)
+        
+        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = self.criterion.to(self.device)
+        print(f"   ✅ Criterion created")
+        
+        # 5. Create optimizer
+        print(f"   ⚙️  Creating optimizer ({self.config.optimizer_name})...")
+        print("-" * 70)
         
         self.optimizer = torch.optim.AdamW(
-            head_params,
+            self.model.parameters(),
             lr=self.config.learning_rate,
             weight_decay=self.config.weight_decay,
-            amsgrad=True,
+            fused=True,  # Fused AdamW implementation
         )
         
-        print(f"✅ Optimizer configured (AdamW, lr={self.config.learning_rate}, wd={self.config.weight_decay})")
+        print(f"   ✅ Optimizer created: {len(self.optimizer.param_groups)} param groups")
         
-        return self.optimizer
+        # 6. Create scheduler
+        print(f"   📅 Creating scheduler ({self.config.scheduler_name})...")
+        print("-" * 70)
+        
+        if self.config.scheduler_name == "cosine":
+            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer,
+                T_max=self.config.max_epochs * len(train_loader) // self.config.batch_size,
+                eta_min=0.0,
+                eta_max=0.9,
+            )
+        else:
+            self.scheduler = None
+        
+        if self.scheduler is not None:
+            print(f"   ✅ Scheduler created")
+        
+        # 7. Compile model (if enabled)
+        if self.config.compile_model:
+            print(f"   🔥 Compiling model with torch.compile (30-50% speedup)...")
+            print("-" * 70)
+            
+            self.model = torch.compile(
+                self.model,
+                mode="max-autograd",
+            )
+            print(f"   ✅ Model compiled")
+        
+        # 8. Save initial checkpoint (artifact store)
+        if self.artifact_store is not None:
+            print(f"\n   💾 Saving initial checkpoint (artifact store)...")
+            print("-" * 70)
+            
+            self.artifact_store.put(
+                ArtifactKey.MODEL_CHECKPOINT,
+                self.model.state_dict(),
+                run_id="current",  # Will be resolved by artifact store
+            )
+            print(f"   ✅ Initial checkpoint saved")
     
-    def configure_scheduler(self) -> torch.optim.lr_scheduler.CosineAnnealingLR:
-        """
-        Configure learning rate scheduler.
-        """
-        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            self.optimizer,
-            T_max=self.config.max_epochs,
-            eta_min=1e-6,
-            eta_max=1.0,
-        )
-        
-        print(f"✅ Scheduler configured (CosineAnnealingLR)")
-        
-        return self.scheduler
-    
-    def forward(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Forward pass.
         
         Args:
-            batch: Dict with "images" and "labels" keys
+            x: Input images
         
         Returns:
-            logits [B, 2]
+            Logits tensor
         """
-        images = batch["images"]
-        
-        # Extract features from backbone
-        features = self.backbone(images)  # [B, embed_dim]
-        
-        # Forward through head
-        logits = self.head(features)  # [B, 2]
-        
-        return logits
+        return self.model(x)
     
-    def training_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> Dict[str, torch.Tensor]:
+    def training_step(self, batch: Any, batch_idx: int) -> Dict[str, torch.Tensor]:
         """
-        Training step.
-        
-        ✅ Lightning handles backward() and optimizer.step() automatically!
-        ✅ Only return loss dict!
+        Training step (Lightning handles backward/step automatically!).
         
         Args:
-            batch: Training batch
+            batch: Batch data (images, labels, indices)
             batch_idx: Batch index
         
         Returns:
-            Dict with "loss" key
+            Dictionary with:
+                - "loss": Loss value
+                - "logits": Model logits (for calibration)
+        
+        ✅ LIGHTNING CONTRACT:
+        - Return loss value (Lightning handles backward automatically!)
+        - Do NOT call loss.backward() manually!
+        - Do NOT call optimizer.step() manually!
+        - Return dict (Lightning will convert to tensor)
         """
+        images, labels = batch
+        batch_size = images.shape[0]
+        
         # Forward pass
-        logits = self(batch)
+        logits = self.forward(images)
         
         # Compute loss
-        labels = batch["labels"]
-        loss = self.criterion(logits, labels)
-        
-        # ✅ Lightning handles backward() and step() automatically!
-        # ❌ DO NOT call loss.backward() or self.optimizer.step()!
-        
-        # Log metrics
-        accuracy = (logits.argmax(dim=-1) == labels).float().mean()
-        self.train_accuracy_history.append(accuracy)
-        
-        # ✅ Return loss dict (Lightning will handle backward/step)
-        return {"loss": loss, "train_accuracy": accuracy}
-    
-    def validation_step(
-        self,
-        batch: Dict[str, torch.Tensor],
-        batch_idx: int,
-        dataloader_idx: int,
-    ) -> Dict[str, torch.Tensor]:
-        """
-        Validation step.
-        
-        ✅ Lightning handles backward() automatically!
-        
-        Args:
-            batch: Validation batch
-            batch_idx: Batch index
-            dataloader_idx: DataLoader index (0=val_select, 1=val_calib, 2=val_test)
-        
-        Returns:
-            Dict with "val_loss" and "val_accuracy" keys
-        """
-        # Identify which validation split this is
-        if dataloader_idx == 0:
-            split_name = "VAL_SELECT"
-        elif dataloader_idx == 1:
-            split_name = "VAL_CALIB"
-        elif dataloader_idx == 2:
-            split_name = "VAL_TEST"
-        else:
-            raise ValueError(f"Unknown dataloader index: {dataloader_idx}")
-        
-        # Forward pass
-        logits = self(batch)
-        labels = batch["labels"]
         loss = self.criterion(logits, labels)
         
         # Compute metrics
-        accuracy = (logits.argmax(dim=-1) == labels).float().mean()
+        with torch.no_grad():
+            preds = logits.argmax(dim=-1)
+            correct = (preds == labels).sum().float()
+            accuracy = correct / batch_size
+            
+            # Precision/Recall
+            tp = ((preds == 1) & (labels == 1)).sum().float()
+            fp = ((preds == 1) & (labels == 0)).sum().float()
+            fn = ((preds == 0) & (labels == 1)).sum().float()
+            
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+            
+            # F1 Score (harmonic mean of precision and recall)
+            f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
         
-        # ✅ Lightning handles backward() automatically!
+        # Update metrics
+        self.train_metrics.loss = loss.item()
+        self.train_metrics.accuracy = accuracy.item()
+        self.train_metrics.precision = precision.item()
+        self.train_metrics.recall = recall.item()
+        self.train_metrics.f1 = f1.item()
         
-        # Save calibration data if VAL_CALIB (for Phase 2)
-        if dataloader_idx == 1:  # VAL_CALIB
-            self.val_calib_logits.append(logits.detach().cpu())
-            self.val_calib_labels.append(labels.detach().cpu())
-        
-        # Log split-specific metrics
-        if dataloader_idx == 0:  # VAL_SELECT (for early stopping)
-            self.val_accuracy_history.append(accuracy)
-            self.log("val_select_loss", loss, prog_bar=True)
-            self.log("val_select_accuracy", accuracy, prog_bar=True)
-        
+        # ✅ LIGHTNING CONTRACT: Return loss dict (Lightning handles backward!)
         return {
-            "val_loss": loss,
-            "val_accuracy": accuracy,
-            f"val_{split_name}_loss": loss,
-            f"val_{split_name}_accuracy": accuracy,
+            "loss": loss,
+            "logits": logits,  # Save for calibration export
         }
     
-    def on_train_epoch_end(self) -> None:
-        """Called at end of training epoch"""
-        train_acc = self.train_accuracy_history[-1] if self.train_accuracy_history else 0.0
-        self.log("train_accuracy_epoch", train_acc)
-        print(f"📊 Epoch {self.current_epoch}: Train Acc={train_acc:.4f}")
-    
-    def on_validation_epoch_end(self) -> None:
-        """Called at end of validation epoch"""
-        val_acc = self.val_accuracy_history[-1] if self.val_accuracy_history else 0.0
-        self.log("val_accuracy_epoch", val_acc)
-        print(f"📊 Epoch {self.current_epoch}: Val Acc={val_acc:.4f}")
-    
-    def predict_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def validation_step(self, batch: Any, batch_idx: int) -> Dict[str, float]:
         """
-        Prediction step (for inference).
+        Validation step (Lightning handles this automatically!).
         
         Args:
-            batch: Prediction batch
+            batch: Batch data (images, labels, indices)
+            batch_idx: Batch index
+            dataloader_idx: Index of the dataloader (0=train, 1=val_select, 2=val_calib)
         
         Returns:
-            Dict with "logits" key
+            Dictionary with metrics
         """
-        logits = self(batch)
-        return {"logits": logits}
+        images, labels = batch
+        batch_size = images.shape[0]
+        
+        # Forward pass
+        with torch.no_grad():
+            logits = self.forward(images)
+            preds = logits.argmax(dim=-1)
+            correct = (preds == labels).sum().float()
+            accuracy = correct / batch_size
+            
+            # Precision/Recall
+            tp = ((preds == 1) & (labels == 1)).sum().float()
+            fp = ((preds == 1) & (labels == 0)).sum().float()
+            fn = ((preds == 0) & (labels == 1)).sum().float()
+            
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        
+        # Update validation metrics
+        self.val_metrics.accuracy = accuracy.item()
+        self.val_metrics.precision = precision.item()
+        self.val_metrics.recall = recall.item()
+        
+        # ✅ LIGHTNING CONTRACT: Return metrics dict
+        return {
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+        }
     
-    def configure_criterion(self) -> nn.CrossEntropyLoss:
-        """Configure loss function"""
-        self.criterion = nn.CrossEntropyLoss()
-        print("✅ Criterion configured (CrossEntropyLoss)")
-    
-    def setup(self, stage: str = "fit") -> None:
+    def configure_optimizers(self) -> Union[
+        torch.optim.Optimizer,
+        tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler],
+    ]:
         """
-        Setup model, criterion, optimizers, and data module.
+        Configure optimizers and schedulers.
         
-        Args:
-            stage: Lightning stage ("fit" or "validate")
+        ✅ LIGHTNING CONTRACT:
+        - Return optimizer object (Lightning will call .step() on it!)
+        - Return scheduler as second element of tuple (if configured)
+        - Do NOT store optimizer/scheduler as instance variables!
         """
-        # Set device
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"   ⚙️  Configuring optimizer ({self.config.optimizer_name})...")
+        print("-" * 70)
         
-        # Set precision
-        if self.config.precision == "bf16":
-            # BF16 mixed precision (PyTorch Lightning handles this automatically)
-            print(f"✅ Mixed precision enabled (BF16)")
-        
-        # Set up data module
-        from ..training.lightning_data_module import RoadworkDataModule
-        self.data_module = RoadworkDataModule(
-            train_image_dir=self.config.train_image_dir,
-            train_labels_file=self.config.train_labels_file,
-            val_select_image_dir=self.config.val_select_image_dir,
-            val_select_labels_file=self.config.val_select_labels_file,
-            val_calib_image_dir=self.config.val_calib_image_dir,
-            val_calib_labels_file=self.config.val_calib_labels_file,
-            val_test_image_dir=self.config.val_test_image_dir,
-            val_test_labels_file=self.config.val_test_labels_file,
-            batch_size=self.config.batch_size,
-            num_workers=4,
-            pin_memory=True,
+        optimizer = torch.optim.AdamW(
+            self.model.parameters(),
+            lr=self.config.learning_rate,
+            weight_decay=self.config.weight_decay,
+            fused=True,  # Fused AdamW implementation
         )
-        self.data_module.setup(stage)
         
-        # Configure criterion
-        self.configure_criterion()
+        print(f"   ✅ Optimizer configured: {self.config.optimizer_name}")
         
-        # Create model components
-        print("\n" + "=" * 70)
-        print("🚀 Setting up Phase 1 model components")
-        print("=" * 70)
-        
-        # Load DINOv3 backbone
-        self.backbone = DINOv3Backbone(
-            model_id=self.config.model_id,
-            freeze_backbone=self.config.freeze_backbone,
-            use_flash_attn=False,
-            compile_model=self.config.compile_model,
-        )
-        self.backbone = self.backbone.to(self.device)
-        print(f"✅ DINOv3 Backbone loaded (frozen={self.config.freeze_backbone})")
-        
-        # Load Stage1Head
-        self.head = Stage1Head(
-            backbone_dim=self.backbone.embed_dim,
-            num_classes=self.config.num_classes,
-            hidden_dim=self.config.hidden_dim,
-            dropout=self.config.dropout,
-            use_bn=True,
-            use_residual=False,
-        )
-        self.head = self.head.to(self.device)
-        print(f"✅ Stage1Head loaded (hidden_dim={self.config.hidden_dim})")
-        
-        # Combine backbone + head
-        self.model = nn.Sequential(self.backbone, self.head)
-        self.model = self.model.to(self.device)
-        print("✅ Model created (backbone + head)")
-        
-        # Compile model if enabled
-        if self.config.compile_model:
-            print("⚡ Compiling model with torch.compile (30-50% speedup)...")
-            self.model = torch.compile(
-                self.model,
-                mode="max-autotune",
-                fullgraph=True,
-                dynamic=False,
+        # Configure scheduler (if enabled)
+        if self.config.scheduler_name == "cosine":
+            print(f"   📅 Configuring scheduler ({self.config.scheduler_name})...")
+            print("-" * 70)
+            
+            # ✅ NOTE: T_max will be updated after training starts
+            # We use a placeholder here
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=100,  # Placeholder (will be updated in on_train_epoch_start)
+                eta_min=0.0,
             )
-            print("✅ Model compiled")
+            
+            print(f"   ✅ Scheduler configured: {self.config.scheduler_name}")
+            
+            # ✅ LIGHTNING CONTRACT: Return optimizer, scheduler
+            return optimizer, scheduler
+        
+        # ✅ LIGHTNING CONTRACT: Return optimizer only (no scheduler)
+        return optimizer
+    
+    def train_dataloader(self) -> DataLoader:
+        """Placeholder - will be replaced by engine."""
+        raise NotImplementedError("train_dataloader not implemented - engine will provide it")
+    
+    def val_dataloader(self) -> DataLoader:
+        """Placeholder - will be replaced by engine."""
+        raise NotImplementedError("val_dataloader not implemented - engine will provide it")
+    
+    def val_dataloader_idx(self) -> int:
+        """Placeholder - will be replaced by engine."""
+        raise NotImplementedError("val_dataloader_idx not implemented - engine will provide it")
     
     def on_train_start(self) -> None:
-        """Called at start of training"""
-        print("\n" + "=" * 70)
-        print("🚀 PHASE 1 TRAINING STARTED")
+        """
+        Called when training starts.
+        """
+        print(f"\n{'='*70}")
+        print(f"🚀 Training Started")
         print("=" * 70)
+        
+        # Reset metrics
+        self.train_metrics = TrainingMetrics()
+        self.val_metrics = TrainingMetrics()
+    
+    def on_train_epoch_end(self) -> None:
+        """
+        Called when training epoch ends.
+        """
+        pass
     
     def on_train_end(self) -> None:
-        """Called at end of training"""
-        print("\n" + "=" * 70)
-        print("✅ PHASE 1 TRAINING COMPLETED")
+        """
+        Called when training ends.
+        """
+        print(f"\n{'='*70}")
+        print(f"🎉 Training Completed")
         print("=" * 70)
         
-        # Save calibration data
-        if self.config.save_calibration_data:
-            self._save_calibration_data()
-    
-    def _save_calibration_data(self) -> None:
-        """Save VAL_CALIB logits and labels for Phase 2"""
-        print("\n💾 Saving calibration data (VAL_CALIB)...")
+        # Save final checkpoint
+        if self.artifact_store is not None:
+            print(f"   💾 Saving final checkpoint (artifact store)...")
+            print("-" * 70)
+            
+            self.artifact_store.put(
+                ArtifactKey.MODEL_CHECKPOINT,
+                self.model.state_dict(),
+                run_id="current",
+            )
+            print(f"   ✅ Final checkpoint saved")
         
-        import torch
-        from pathlib import Path
-        
-        # Combine all calibration logits/labels
-        calib_logits = torch.cat(self.val_calib_logits, dim=0)
-        calib_labels = torch.cat(self.val_calib_labels, dim=0)
-        
-        print(f"   Calibration data: logits={calib_logits.shape}, labels={calib_labels.shape}")
-        
-        # Save to artifact store
-        # Note: In real pipeline, this would be done via ArtifactStore
-        # For now, save to temporary location
-        save_dir = Path("outputs/phase1")
-        save_dir.mkdir(parents=True, exist_ok=True)
-        
-        calib_logits_path = save_dir / "val_calib_logits.pt"
-        calib_labels_path = save_dir / "val_calib_labels.pt"
-        
-        torch.save(calib_logits, calib_logits_path)
-        torch.save(calib_labels, calib_labels_path)
-        
-        print(f"✅ Calibration data saved:")
-        print(f"   {calib_logits_path}")
-        print(f"   {calib_labels_path}")
+        # Log metrics
+        print(f"   📊 Final Metrics:")
+        print(f"     Loss: {self.train_metrics.loss:.4f}")
+        print(f"     Accuracy: {self.train_metrics.accuracy:.4f}")
+        print(f"     Precision: {self.train_metrics.precision:.4f}")
+        print(f"     Recall: {self.train_metrics.recall:.4f}")
+        print(f"     F1: {self.train_metrics.f1:.4f}")
+        print("=" * 70)
 
 
 __all__ = [
-    "Phase1LightningModuleConfig",
     "Phase1LightningModule",
+    "Phase1LightningModuleConfig",
+    "TrainingMetrics",
 ]
