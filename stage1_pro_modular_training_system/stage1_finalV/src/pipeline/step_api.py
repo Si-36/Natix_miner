@@ -71,8 +71,9 @@ class StepSpec(ABC):
         """
         pass
 
+    @classmethod
     @abstractmethod
-    def allowed_splits(self) -> FrozenSet[str]:
+    def allowed_splits(cls) -> FrozenSet[str]:
         """
         Declare which data splits this step is allowed to use.
 

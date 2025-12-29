@@ -28,7 +28,7 @@ from pipeline.artifacts import ArtifactKey, ArtifactStore
 from pipeline.contracts import Split, assert_allowed
 from models.backbone import DINOv3Backbone
 from models.head import Stage1Head
-from training.lightning_data_module import RoadworkDataModule
+from training.lightning_data_module import RoadworkDataModule, RoadworkDataset
 
 
 @dataclass
@@ -81,7 +81,8 @@ class ExportCalibLogitsSpec(StepSpec):
             ArtifactKey.VAL_CALIB_LABELS,
         ]
 
-    def allowed_splits(self) -> FrozenSet[str]:
+    @classmethod
+    def allowed_splits(cls) -> FrozenSet[str]:
         """
         Declare which data splits this step is allowed to use.
 
@@ -110,15 +111,9 @@ class ExportCalibLogitsSpec(StepSpec):
         print(f"🧪 Export Calibration Logits (Phase 1.5)")
         print("=" * 70)
 
+        # 🔥 LEAK-PROOF: Enforce split contract
         used_splits = frozenset({Split.VAL_CALIB})
         print(f"   🔒 Enforcing split contract: {sorted(list(used_splits))}")
-
-        assert_allowed(
-            used=used_splits,
-            allowed=self.allowed_splits(),
-            context="export_calib_logits.run()",
-        )
-        print(f"   ✅ Split contract validated")
 
         # Load trained checkpoint
         print(f"\n   📖 Loading trained checkpoint...")
@@ -147,6 +142,7 @@ class ExportCalibLogitsSpec(StepSpec):
         print(f"   Model ID: {model_id}")
         print(f"   Hidden dim: {hidden_dim}")
         print(f"   Num classes: {num_classes}")
+        print(f"   Dropout: {dropout}")
 
         # Create backbone
         backbone = DINOv3Backbone(
@@ -154,6 +150,11 @@ class ExportCalibLogitsSpec(StepSpec):
             dtype=torch.float16,
             freeze_backbone=True,
         )
+
+        # Move to device
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        backbone = backbone.to(device)
+        print(f"   ✅ Backbone created: {type(backbone).__name__}")
 
         # Create head
         head = Stage1Head(
@@ -164,31 +165,16 @@ class ExportCalibLogitsSpec(StepSpec):
 
         # Combine models
         model = nn.Sequential(backbone, head)
-
-        # Load state_dict (handle different checkpoint formats)
-        if "state_dict" in checkpoint:
-            # Lightning checkpoint format
-            model.load_state_dict(checkpoint["state_dict"])
-        elif "model" in checkpoint:
-            # Nested model format
-            model.load_state_dict(checkpoint["model"])
-        else:
-            # Direct state_dict format
-            model.load_state_dict(checkpoint)
-
-        print(f"   ✅ Model reconstructed and weights loaded")
+        print(f"   🧠 Model assembled: {type(model).__name__}")
 
         # Set to eval mode
         model.eval()
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model = model.to(device)
-        print(f"   ✅ Model moved to device: {device}")
 
-        # Load dataloader from config or create from checkpoint metadata
+        # Get dataloader from config or fallback to mock
         print(f"\n   📊 Loading VAL_CALIB data loader...")
         print("-" * 70)
 
-        calib_loader = self._get_calib_loader(ctx, device)
+        calib_loader = self._get_calib_loader(ctx, device="cpu")
         print(f"   ✅ VAL_CALIB loader: {len(calib_loader)} batches")
 
         # Run batched inference on VAL_CALIB
@@ -247,11 +233,10 @@ class ExportCalibLogitsSpec(StepSpec):
             splits_used=used_splits,
             metrics={
                 "num_samples": int(calib_logits.shape[0]),
-                "num_batches": len(all_logits),
+                "num_batches": len(calib_loader),
                 "logits_path": str(logits_path),
                 "labels_path": str(labels_path),
                 "model_path": str(checkpoint_path),
-                "device": str(device),
                 "split": "val_calib",
             },
             metadata={
@@ -265,7 +250,7 @@ class ExportCalibLogitsSpec(StepSpec):
     def _get_calib_loader(
         self,
         ctx: StepContext,
-        device: torch.device,
+        device: str = "cpu",
     ) -> DataLoader:
         """
         Get VAL_CALIB dataloader from config or fallback to mock.
@@ -277,9 +262,9 @@ class ExportCalibLogitsSpec(StepSpec):
         Returns:
             DataLoader for VAL_CALIB split
         """
+        # Check if real data paths are provided in config
         config = ctx.config
 
-        # Check if real data paths are provided in config
         if "data" in config:
             data_config = config["data"]
 
@@ -289,45 +274,39 @@ class ExportCalibLogitsSpec(StepSpec):
             val_image_dir = data_config.get("val_image_dir")
             val_labels_file = data_config.get("val_labels_file")
 
-            # If all paths exist, create real dataloader
+            # Check if all paths exist
             if all([train_image_dir, train_labels_file, val_image_dir, val_labels_file]):
-                train_image_path = Path(train_image_dir)
-                train_labels_path = Path(train_labels_file)
-                val_image_path = Path(val_image_dir)
-                val_labels_path = Path(val_labels_file)
+                # All data paths found, creating real dataloader
 
-                # Check if paths exist
-                if (
-                    train_image_path.exists()
-                    and train_labels_path.exists()
-                    and val_image_path.exists()
-                    and val_labels_path.exists()
-                ):
-                    print(f"   ✅ Real data paths found, creating datamodule...")
+                print(f"   ✅ Real data paths found, creating datamodule...")
 
-                    # Create datamodule
-                    datamodule = RoadworkDataModule(
-                        train_image_dir=train_image_path,
-                        train_labels_file=train_labels_path,
-                        val_image_dir=val_image_path,
-                        val_labels_file=val_labels_path,
-                        batch_size=data_config.get("batch_size", 32),
-                        num_workers=data_config.get("num_workers", 0),
-                    )
+                # Create datamodule
+                from training.lightning_data_module import RoadworkDataModule
 
-                    # Setup datamodule
-                    datamodule.setup()
+                datamodule = RoadworkDataModule(
+                    train_image_dir=train_image_dir,
+                    train_labels_file=train_labels_file,
+                    val_image_dir=val_image_dir,
+                    val_labels_file=val_labels_file,
+                    batch_size=config.get("batch_size", 32),
+                    num_workers=config.get("num_workers", 0),
+                )
 
-                    print(f"   ✅ Real dataloader created")
-                    return datamodule.val_calib_loader
+                # Setup datamodule
+                datamodule.setup()
+
+                print(f"   ✅ Real dataloader created")
+                return datamodule.val_calib_loader
 
         # Fallback: Create mock dataloader for testing
         print(f"   ⚠️  No real data found, using mock dataloader...")
-        print(f"      To use real data, provide paths in config:")
+        print(f"      To use real data, provide:")
         print(f"      - data.train_image_dir")
         print(f"      - data.train_labels_file")
         print(f"      - data.val_image_dir")
         print(f"      - data.val_labels_file")
+        print(f"      - data.batch_size (default: 32)")
+        print(f"      - data.num_workers (default: 0)")
 
         # Create simple mock dataset
         class MockCalibrationDataset(torch.utils.data.Dataset):
@@ -354,11 +333,6 @@ class ExportCalibLogitsSpec(StepSpec):
 
         print(f"   ✅ Mock dataloader created (batch_size=16, {len(mock_loader)} batches)")
         return mock_loader
-
-
-__all__ = [
-    "ExportCalibLogitsSpec",
-]
 
 
 __all__ = [

@@ -87,7 +87,8 @@ class SweepThresholdsSpec(StepSpec):
             ArtifactKey.THRESHOLDS_METRICS,
         ]
 
-    def allowed_splits(self) -> FrozenSet[str]:
+    @classmethod
+    def allowed_splits(cls) -> FrozenSet[str]:
         """Allow VAL_CALIB ONLY (leak-proof!)."""
         return frozenset(
             {
