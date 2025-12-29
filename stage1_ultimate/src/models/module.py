@@ -168,7 +168,7 @@ class DINOv3Classifier(L.LightningModule):
 
     Example:
         >>> model = DINOv3Classifier(
-        ...     backbone_name="facebook/dinov3-vith16-pretrain-lvd1689m",
+        ...     backbone_name="facebook/dinov3-vith16plus-pretrain-lvd1689m",
         ...     num_classes=13,
         ...     freeze_backbone=True,
         ...     learning_rate=1e-4
@@ -179,7 +179,7 @@ class DINOv3Classifier(L.LightningModule):
 
     def __init__(
         self,
-        backbone_name: str = "facebook/dinov3-vith16-pretrain-lvd1689m",
+        backbone_name: str = "facebook/dinov3-vith16plus-pretrain-lvd1689m",
         num_classes: int = 13,
         freeze_backbone: bool = True,
         head_type: str = "linear",
@@ -552,7 +552,7 @@ if __name__ == "__main__":
 
     # Create model (will load from HuggingFace)
     model = DINOv3Classifier(
-        backbone_name="facebook/dinov3-vith16-pretrain-lvd1689m",
+        backbone_name="facebook/dinov3-vith16plus-pretrain-lvd1689m",
         num_classes=13,
         freeze_backbone=True,
         head_type="linear",

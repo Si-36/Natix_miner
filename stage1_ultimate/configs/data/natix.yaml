@@ -42,8 +42,8 @@ splits:
 
 # Image preprocessing
 preprocessing:
-  resize: 518  # DINOv2 recommended size
-  crop_size: 518
+  resize: 224  # DINOv3 standard resolution
+  crop_size: 224
   mean: [0.485, 0.456, 0.406]  # ImageNet mean
   std: [0.229, 0.224, 0.225]   # ImageNet std
   interpolation: bilinear
@@ -72,21 +72,21 @@ augmentation:
 
   # No augmentation for val/test
   val:
-    resize: 518
-    crop_size: 518
+    resize: 224
+    crop_size: 224
     center_crop: true
 
 # Multi-view settings
 multiview:
   enabled: true
   global_crop:
-    size: 518
+    size: 224
     scale: [0.8, 1.0]
 
   local_crops:
     enabled: true
     num_crops: 9  # 3x3 grid
-    size: 173     # 518 / 3
+    size: 75      # 224 / 3 (rounded)
     scale: [0.3, 0.8]
 
 # Slice-based evaluation

@@ -42,7 +42,7 @@ multiview_grid_size: [3, 3]  # 3×3 grid = 9 tiles
 multiview_overlap: 0.15  # 15% overlap
 
 # Image preprocessing (DINOv3 specific)
-image_size: 518  # DINOv3 recommended size (NOT 224!)
+image_size: 224  # DINOv3 standard resolution (224×224)
 patch_size: 16  # DINOv3 ViT-H/16
 preprocessing:
   mean: [0.485, 0.456, 0.406]  # ImageNet mean
@@ -56,5 +56,5 @@ preprocessing:
 #
 # Safe hyperparameters (DO NOT increase without validation):
 #   - dropout_rate: 0.3 (NOT 0.45)
-#   - image_size: 518 (NOT 224 for DINOv3)
+#   - image_size: 224 (standard DINOv3 resolution)
 #   - ema_decay: 0.9999 (standard)

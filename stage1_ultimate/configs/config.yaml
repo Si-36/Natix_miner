@@ -79,8 +79,8 @@ multiview:
 # Augmentation
 augmentation:
   train:
-    resize: 518          # DINOv2 recommended size
-    crop_size: 518
+    resize: 224          # DINOv3 standard resolution
+    crop_size: 224
     horizontal_flip: 0.5
     color_jitter: 0.4
     auto_augment: true   # Use AutoAugment
@@ -88,8 +88,8 @@ augmentation:
     cutmix_alpha: 1.0
 
   val:
-    resize: 518
-    crop_size: 518
+    resize: 224
+    crop_size: 224
     center_crop: true
 
 # Regularization

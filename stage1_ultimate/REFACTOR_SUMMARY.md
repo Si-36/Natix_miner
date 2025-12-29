@@ -2,15 +2,24 @@
 
 ## What's Being Fixed
 
-### **CRITICAL FIXES**:
-1. ✅ **Zero Hardcoding**: All paths/hyperparams from `cfg`
-2. ✅ **Phase 1 → Phase 4 Integration**: Load ExPLoRA checkpoint if `cfg.model.init_from_explora=true`
-3. ✅ **Phase 2 Implementation**: Threshold sweep (CPU-fast, required for export)
-4. ✅ **Phase 5 Implementation**: Temperature scaling calibration
-5. ✅ **Phase 6 Implementation**: Bundle export (deployable artifact)
-6. ✅ **Metric Logging Fix**: Log `val_select/acc` (not just `val/acc`) for early stopping
-7. ✅ **Phase 1 Writes metrics.csv**: Required by contract
-8. ✅ **ValCalibArtifactSaver Optimization**: Reuse `validation_step` outputs (no extra forward pass)
+### **FOUNDATION FIXES (COMPLETED)**:
+1. ✅ **Backbone API Mismatch**: Removed `pretrained_path` parameter (module.py → backbone.py)
+2. ✅ **Resolution Strategy**: Fixed 518 → 224 (DINOv3 standard)
+3. ✅ **Model Name**: Fixed to `facebook/dinov3-vith16plus-pretrain-lvd1689m`
+4. ✅ **Syntax Validation**: All modified files pass Python compilation
+
+### **CRITICAL FIXES (COMPLETED)**:
+1. ✅ **Metric Logging Fix**: Log `val_select/acc` (not just `val/acc`) for early stopping
+2. ✅ **ValCalibArtifactSaver Optimization**: Reuse `validation_step` outputs (no extra forward pass)
+3. ✅ **Artifact Format**: Save as .pt (torch.save), not .npy
+
+### **PIPELINE FIXES (TODO)**:
+1. ⏭️ **Zero Hardcoding**: All paths/hyperparams from `cfg`
+2. ⏭️ **Phase 1 → Phase 4 Integration**: Load ExPLoRA checkpoint if `cfg.model.init_from_explora=true`
+3. ⏭️ **Phase 2 Implementation**: Threshold sweep (CPU-fast, required for export)
+4. ⏭️ **Phase 5 Implementation**: Temperature scaling calibration
+5. ⏭️ **Phase 6 Implementation**: Bundle export (deployable artifact)
+6. ⏭️ **Phase 1 Writes metrics.csv**: Required by contract
 
 ---
 

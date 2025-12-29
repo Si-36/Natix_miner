@@ -64,25 +64,30 @@ def resolve_phases(phase_names: List[str]) -> List[PhaseType]:
     return [phase_map[name] for name in phase_names if name in phase_map]
 
 
-def register_phase_executors(engine: DAGEngine) -> None:
+def register_phase_executors(engine: DAGEngine, cfg: DictConfig) -> None:
     """
-    Register executor functions for all phases
+    Register executor functions for all phases (FULLY HYDRA-DRIVEN)
 
-    CRITICAL FIX: phase1_executor is now REAL (not stub)!
+    Args:
+        engine: DAG execution engine
+        cfg: Hydra configuration (all hyperparams, paths, etc.)
     """
 
     def phase1_executor(artifacts):
         """
-        Phase 1: Baseline Training
+        Phase 1: Baseline Training (FULLY HYDRA-DRIVEN 2025-12-29)
 
-        FIXED (2025-12-29 Production-Ready):
-        - Uses torch.save() for .pt files (NOT np.save())
-        - Copies checkpoint to schema-compliant path (model_best.pth)
-        - Uses real HuggingFace model ID (NOT "vit_huge")
-        - Val_calib saver via callback (clean separation)
-        - Config-driven paths (TODO: wire from Hydra)
+        COMPLETE FIXES:
+        - ✅ Zero hardcoding (all from cfg.*)
+        - ✅ Loads ExPLoRA checkpoint if cfg.model.init_from_explora=true
+        - ✅ Writes metrics.csv (contract requirement)
+        - ✅ Correct early stopping monitor (val_select/acc)
+        - ✅ Uses torch.save() for .pt artifacts
+        - ✅ Val calib callback (reuses validation outputs)
         """
         import shutil
+        import pandas as pd
+        import torch
         import lightning as L
         from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
         from data import NATIXDataModule
@@ -90,54 +95,81 @@ def register_phase_executors(engine: DAGEngine) -> None:
         from callbacks import ValCalibArtifactSaver
 
         logger.info("=" * 80)
-        logger.info("PHASE 1: Baseline Training (Production-Ready)")
+        logger.info("PHASE 1: Baseline Training (Hydra-Driven)")
         logger.info("=" * 80)
 
-        # TODO: Get from Hydra config (for now hardcoded with TODO markers)
-        DATA_ROOT = "/data/natix"  # TODO: cfg.data.root
-        DINOV3_MODEL = "facebook/dinov3-vith16-pretrain-lvd1689m"  # TODO: cfg.model.backbone_id
-        BATCH_SIZE = 32  # TODO: cfg.training.batch_size
-        MAX_EPOCHS = 50  # TODO: cfg.training.max_epochs
-        NUM_WORKERS = 4  # TODO: cfg.hardware.num_workers
+        # Read from Hydra config (ZERO hardcoding!)
+        data_root = cfg.data.data_root
+        backbone_id = cfg.model.backbone_id
+        num_classes = cfg.model.num_classes
+        batch_size = cfg.data.dataloader.batch_size
+        num_workers = cfg.data.dataloader.num_workers
+        max_epochs = cfg.training.epochs
+        learning_rate = cfg.training.optimizer.lr
+        weight_decay = cfg.training.optimizer.weight_decay
+        num_gpus = cfg.hardware.num_gpus
+        precision = "16-mixed" if cfg.training.mixed_precision.enabled else "32"
 
-        logger.info(f"Data root: {DATA_ROOT}")
-        logger.info(f"DINOv3 model: {DINOV3_MODEL}")
+        # Early stopping config
+        monitor_metric = cfg.training.early_stopping.monitor  # "val_select/acc"
+        monitor_mode = cfg.training.early_stopping.mode  # "max"
+        patience = cfg.training.early_stopping.patience
+
+        logger.info(f"Data root: {data_root}")
+        logger.info(f"Backbone: {backbone_id}")
+        logger.info(f"Batch size: {batch_size}, Epochs: {max_epochs}")
+        logger.info(f"Early stopping: {monitor_metric} ({monitor_mode}, patience={patience})")
 
         # Create datamodule
         datamodule = NATIXDataModule(
-            data_root=DATA_ROOT,
+            data_root=data_root,
             splits_json=str(artifacts.splits_json),
-            batch_size=BATCH_SIZE,
-            num_workers=NUM_WORKERS,
+            batch_size=batch_size,
+            num_workers=num_workers,
         )
 
-        # Create model (FIXED: use real HF model ID)
+        # Create model (config-driven, NOT hardcoded!)
         model = DINOv3Classifier(
-            backbone_name=DINOV3_MODEL,  # HF model ID (backbone factory handles loading)
-            num_classes=13,
-            freeze_backbone=True,
-            head_type="linear",
-            dropout_rate=0.3,
-            learning_rate=1e-4,
-            weight_decay=0.01,
-            use_ema=True,
+            backbone_name=backbone_id,
+            num_classes=num_classes,
+            freeze_backbone=cfg.model.freeze_backbone,
+            head_type=cfg.model.head_type,
+            dropout_rate=cfg.model.dropout_rate,
+            learning_rate=learning_rate,
+            weight_decay=weight_decay,
+            use_ema=cfg.model.use_ema,
+            ema_decay=cfg.checkpointing.ema_decay,
+            use_multiview=cfg.model.use_multiview,
+            multiview_aggregation=cfg.model.multiview_aggregation,
+            multiview_topk=cfg.model.multiview_topk,
         )
+
+        # CRITICAL FIX: Load ExPLoRA checkpoint if requested
+        if cfg.model.init_from_explora and artifacts.explora_checkpoint.exists():
+            logger.info(f"Loading ExPLoRA checkpoint: {artifacts.explora_checkpoint}")
+            explora_state = torch.load(artifacts.explora_checkpoint, map_location="cpu")
+            model.net["backbone"].model.load_state_dict(explora_state, strict=False)
+            logger.info("✅ Loaded ExPLoRA-adapted backbone (Phase 4 → Phase 1)")
+        elif cfg.model.init_from_explora:
+            logger.warning(
+                f"ExPLoRA requested but checkpoint not found: {artifacts.explora_checkpoint}"
+            )
 
         logger.info(f"Model trainable params: {model.net['head'].num_parameters:,}")
 
-        # Callbacks (FIXED: Val calib saver via callback)
+        # Callbacks (config-driven, correct monitoring)
         callbacks = [
             ModelCheckpoint(
                 dirpath=str(artifacts.phase1_dir),
-                filename="best_model",  # Will be renamed after training
-                monitor="val/loss",
-                mode="min",
+                filename="best_model",
+                monitor=monitor_metric,  # "val_select/acc" from cfg
+                mode=monitor_mode,       # "max" from cfg
                 save_top_k=1,
             ),
             EarlyStopping(
-                monitor="val/loss",
-                mode="min",
-                patience=10,
+                monitor=monitor_metric,  # "val_select/acc" from cfg
+                mode=monitor_mode,       # "max" from cfg
+                patience=patience,       # from cfg
                 verbose=True,
             ),
             ValCalibArtifactSaver(
@@ -147,12 +179,12 @@ def register_phase_executors(engine: DAGEngine) -> None:
             ),
         ]
 
-        # Trainer
+        # Trainer (config-driven)
         trainer = L.Trainer(
-            max_epochs=MAX_EPOCHS,
+            max_epochs=max_epochs,
             accelerator="auto",
-            devices=1,
-            precision="16-mixed",
+            devices=num_gpus,
+            precision=precision,
             callbacks=callbacks,
             default_root_dir=str(artifacts.phase1_dir),
             log_every_n_steps=10,
@@ -171,14 +203,25 @@ def register_phase_executors(engine: DAGEngine) -> None:
         else:
             logger.error(f"Best checkpoint not found: {best_ckpt_path}")
 
-        # Save config (FIXED: use real model ID)
+        # CRITICAL FIX: Write metrics.csv (required by contract)
+        if hasattr(trainer.logger, 'metrics') and trainer.logger.metrics:
+            metrics_df = pd.DataFrame(trainer.logger.metrics)
+            metrics_df.to_csv(artifacts.metrics_csv, index=False)
+            logger.info(f"Saved metrics: {artifacts.metrics_csv}")
+        else:
+            logger.warning("No metrics to save (trainer.logger.metrics empty)")
+
+        # Save config (config-driven, NOT hardcoded!)
         import json
         config = {
-            "backbone_id": DINOV3_MODEL,
-            "num_classes": 13,
-            "batch_size": BATCH_SIZE,
-            "max_epochs": MAX_EPOCHS,
+            "backbone_id": backbone_id,
+            "num_classes": num_classes,
+            "batch_size": batch_size,
+            "max_epochs": max_epochs,
+            "learning_rate": learning_rate,
+            "monitor_metric": monitor_metric,
             "best_checkpoint": str(artifacts.phase1_checkpoint),
+            "init_from_explora": cfg.model.init_from_explora,
         }
         with open(artifacts.config_json, "w") as f:
             json.dump(config, f, indent=2)
@@ -186,11 +229,66 @@ def register_phase_executors(engine: DAGEngine) -> None:
         logger.info(f"✅ Phase 1 complete!")
         logger.info(f"Checkpoint: {artifacts.phase1_checkpoint}")
         logger.info(f"Val calib: {artifacts.val_calib_logits}, {artifacts.val_calib_labels}")
+        logger.info(f"Metrics: {artifacts.metrics_csv}")
         logger.info("=" * 80)
 
     def phase2_executor(artifacts):
-        logger.warning("Phase 2 executor not implemented yet")
-        raise NotImplementedError("TODO: Implement Phase 2 threshold sweep")
+        """
+        Phase 2: Threshold Sweep (Selective Prediction)
+
+        Contract:
+        - Input: val_calib_logits.pt, val_calib_labels.pt
+        - Output: thresholds.json
+        - Allowed split: VAL_CALIB only
+
+        Simple, CPU-fast, required for export.
+        """
+        import json
+        import torch
+        import numpy as np
+        from sklearn.metrics import f1_score
+
+        logger.info("=" * 80)
+        logger.info("PHASE 2: Threshold Sweep")
+        logger.info("=" * 80)
+
+        # Load val_calib logits/labels
+        logger.info(f"Loading: {artifacts.val_calib_logits}")
+        logits = torch.load(artifacts.val_calib_logits)
+        labels = torch.load(artifacts.val_calib_labels)
+
+        logger.info(f"Logits shape: {logits.shape}, Labels shape: {labels.shape}")
+
+        # Convert to probabilities
+        probs = torch.softmax(logits, dim=-1)
+
+        # Sweep thresholds (0.1 to 0.9, step 0.05)
+        best_threshold = 0.5
+        best_f1 = 0.0
+
+        logger.info("Sweeping thresholds...")
+        for threshold in np.arange(0.1, 0.95, 0.05):
+            preds = (probs.max(dim=-1).values > threshold).long() * probs.argmax(dim=-1)
+            f1 = f1_score(labels.numpy(), preds.numpy(), average="macro", zero_division=0)
+
+            if f1 > best_f1:
+                best_f1 = f1
+                best_threshold = threshold
+                logger.info(f"  New best: threshold={threshold:.3f}, F1={f1:.3f}")
+
+        # Save to thresholds.json
+        thresholds = {
+            "threshold": float(best_threshold),
+            "f1_score": float(best_f1),
+            "method": "global_threshold",
+        }
+
+        with open(artifacts.thresholds_json, "w") as f:
+            json.dump(thresholds, f, indent=2)
+
+        logger.info(f"✅ Phase 2 complete: threshold={best_threshold:.3f}, F1={best_f1:.3f}")
+        logger.info(f"Saved: {artifacts.thresholds_json}")
+        logger.info("=" * 80)
 
     def phase3_executor(artifacts):
         logger.warning("Phase 3 executor not implemented yet")
@@ -224,7 +322,7 @@ def register_phase_executors(engine: DAGEngine) -> None:
 
         # Configuration (TODO: Get from Hydra config)
         DATA_ROOT = "/data/natix"  # TODO: cfg.data.root
-        DINOV3_MODEL = "facebook/dinov3-vith16-pretrain-lvd1689m"  # FIXED: DINOv3, NOT DINOv2
+        DINOV3_MODEL = "facebook/dinov3-vith16plus-pretrain-lvd1689m"  # FIXED: DINOv3, NOT DINOv2
         BATCH_SIZE = 16  # TODO: cfg.training.batch_size (per GPU)
         MAX_EPOCHS = 100  # TODO: cfg.training.max_epochs
         NUM_WORKERS = 4  # TODO: cfg.hardware.num_workers
@@ -369,12 +467,115 @@ def register_phase_executors(engine: DAGEngine) -> None:
             logger.info("=" * 80)
 
     def phase5_executor(artifacts):
-        logger.warning("Phase 5 executor not implemented yet")
-        raise NotImplementedError("TODO: Implement SCRC calibration")
+        """
+        Phase 5: SCRC Calibration (Temperature Scaling)
+
+        Contract:
+        - Input: val_calib_logits.pt, val_calib_labels.pt
+        - Output: scrcparams.json
+        - Allowed split: VAL_CALIB only
+
+        Calibrate temperature parameter using LBFGS optimization.
+        """
+        import json
+        import torch
+        import torch.nn as nn
+        import torch.optim as optim
+
+        logger.info("=" * 80)
+        logger.info("PHASE 5: SCRC Calibration (Temperature Scaling)")
+        logger.info("=" * 80)
+
+        # Load val_calib logits/labels
+        logger.info(f"Loading: {artifacts.val_calib_logits}")
+        logits = torch.load(artifacts.val_calib_logits)
+        labels = torch.load(artifacts.val_calib_labels)
+
+        logger.info(f"Logits shape: {logits.shape}, Labels shape: {labels.shape}")
+
+        # Temperature scaling: calibrate temperature parameter
+        temperature = nn.Parameter(torch.ones(1))
+        optimizer = optim.LBFGS([temperature], lr=0.01, max_iter=50)
+
+        def eval_fn():
+            optimizer.zero_grad()
+            scaled_logits = logits / temperature
+            loss = nn.functional.cross_entropy(scaled_logits, labels)
+            loss.backward()
+            return loss
+
+        logger.info("Optimizing temperature parameter...")
+        optimizer.step(eval_fn)
+
+        # Final loss
+        with torch.no_grad():
+            final_loss = eval_fn().item()
+
+        # Save calibration params
+        params = {
+            "method": "temperature_scaling",
+            "temperature": float(temperature.item()),
+            "calibration_loss": float(final_loss),
+        }
+
+        with open(artifacts.scrcparams_json, "w") as f:
+            json.dump(params, f, indent=2)
+
+        logger.info(f"✅ Phase 5 complete: temperature={temperature.item():.4f}, loss={final_loss:.4f}")
+        logger.info(f"Saved: {artifacts.scrcparams_json}")
+        logger.info("=" * 80)
 
     def phase6_executor(artifacts):
-        logger.warning("Phase 6 executor not implemented yet")
-        raise NotImplementedError("TODO: Implement bundle export")
+        """
+        Phase 6: Bundle Export
+
+        Contract:
+        - Input: phase1_checkpoint, splits.json, ONE policy (threshold OR scrc)
+        - Output: bundle.json
+        - Packages: model + policy for deployment
+        """
+        import json
+        import pandas as pd
+
+        logger.info("=" * 80)
+        logger.info("PHASE 6: Bundle Export")
+        logger.info("=" * 80)
+
+        # Determine which policy to use (CRITICAL: exactly ONE)
+        if artifacts.scrcparams_json.exists():
+            policy_path = artifacts.scrcparams_json
+            policy_type = "scrc"
+        elif artifacts.thresholds_json.exists():
+            policy_path = artifacts.thresholds_json
+            policy_type = "threshold"
+        else:
+            raise FileNotFoundError(
+                "No policy file found! Need thresholds.json or scrcparams.json. "
+                "Run Phase 2 (threshold) or Phase 5 (SCRC) first."
+            )
+
+        logger.info(f"Policy: {policy_type} ({policy_path})")
+
+        # Create bundle manifest
+        bundle = {
+            "model_checkpoint": str(artifacts.phase1_checkpoint.relative_to(artifacts.output_dir)),
+            "policy_type": policy_type,
+            "policy_path": str(policy_path.relative_to(artifacts.output_dir)),
+            "splits_json": str(artifacts.splits_json.relative_to(artifacts.output_dir)),
+            "num_classes": cfg.model.num_classes,
+            "backbone_id": cfg.model.backbone_id,
+            "created_at": pd.Timestamp.now().isoformat(),
+        }
+
+        # Write bundle.json
+        with open(artifacts.bundle_json, "w") as f:
+            json.dump(bundle, f, indent=2)
+
+        logger.info(f"✅ Phase 6 complete: bundle exported")
+        logger.info(f"Model:  {artifacts.phase1_checkpoint}")
+        logger.info(f"Policy: {policy_path} ({policy_type})")
+        logger.info(f"Bundle: {artifacts.bundle_json}")
+        logger.info("=" * 80)
 
     engine.register_executor(PhaseType.PHASE1_BASELINE, phase1_executor)
     engine.register_executor(PhaseType.PHASE2_THRESHOLD, phase2_executor)
@@ -410,7 +611,7 @@ def main(cfg: DictConfig) -> None:
     engine = DAGEngine(artifacts=artifacts)
 
     # Register phase executors
-    register_phase_executors(engine)
+    register_phase_executors(engine, cfg)
 
     # Get phases to run
     phases_config = cfg.pipeline.get("phases", [])
