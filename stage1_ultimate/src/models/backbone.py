@@ -19,7 +19,7 @@ Latest 2025-2026 practices:
 
 import logging
 from pathlib import Path
-from typing import Optional, Literal
+from typing import Optional, Literal, Any
 
 import torch
 import torch.nn as nn

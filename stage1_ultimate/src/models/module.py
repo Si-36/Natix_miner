@@ -287,10 +287,13 @@ class DINOv3Classifier(L.LightningModule):
             logger.info("EMA initialized (tracking only model params)")
 
     def forward(
-        self, images: torch.Tensor, use_multiview: bool = False
+        self,
+        images: torch.Tensor,
+        use_multiview: bool = False,
+        content_boxes: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
-        Forward pass
+        Forward pass (2025-12-29 with content-aware multi-view support)
 
         CRITICAL: Multi-view is ONLY used during validation/test, NOT training!
         Training always uses single-view (multi-view is too slow).
@@ -298,13 +301,15 @@ class DINOv3Classifier(L.LightningModule):
         Args:
             images: Input images [B, 3, H, W]
             use_multiview: If True and multiview is enabled, use multi-view inference
+            content_boxes: Optional content boxes [B, 4] in (x1, y1, x2, y2) format
+                          Only used when use_multiview=True (letterbox mode).
 
         Returns:
             logits: Class logits [B, num_classes]
         """
         # Multi-view forward (if requested and available)
         if use_multiview and self.multiview is not None:
-            return self.multiview(images)  # [B, num_classes]
+            return self.multiview(images, content_boxes=content_boxes)  # [B, num_classes]
 
         # Single-view forward (default)
         features = self.net["backbone"](images)  # [B, hidden_size]
@@ -368,23 +373,33 @@ class DINOv3Classifier(L.LightningModule):
         self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int, dataloader_idx: int = 0
     ) -> torch.Tensor:
         """
-        Validation step (handles BOTH val_select and val_calib)
+        Validation step (2025-12-29 with content-aware multi-view support)
 
         CRITICAL:
         - dataloader_idx=0: val_select (for early stopping)
         - dataloader_idx=1: val_calib (for calibration - save logits!)
         - Uses multi-view if enabled (only for validation, not training!)
         - Uses EMA weights if enabled
+        - Supports both batch formats: (images, labels) and (images, labels, content_boxes)
 
         Args:
-            batch: Tuple of (images, labels)
+            batch: Tuple of (images, labels) OR (images, labels, content_boxes)
             batch_idx: Batch index
             dataloader_idx: Which dataloader (0=val_select, 1=val_calib)
 
         Returns:
             loss: Validation loss
         """
-        images, labels = batch
+        # Unpack batch (support both formats)
+        if len(batch) == 3:
+            # Letterbox mode: (images, labels, content_boxes)
+            images, labels, content_boxes = batch
+        elif len(batch) == 2:
+            # Standard mode: (images, labels)
+            images, labels = batch
+            content_boxes = None
+        else:
+            raise ValueError(f"Expected batch with 2 or 3 elements, got {len(batch)}")
 
         # Use multi-view if available (for better validation accuracy)
         use_mv = self.multiview is not None
@@ -392,9 +407,9 @@ class DINOv3Classifier(L.LightningModule):
         # Forward pass (with EMA if enabled, with multi-view if enabled)
         if self.use_ema and self.ema is not None:
             with self.ema.average_parameters():
-                logits = self.forward(images, use_multiview=use_mv)
+                logits = self.forward(images, use_multiview=use_mv, content_boxes=content_boxes)
         else:
-            logits = self.forward(images, use_multiview=use_mv)
+            logits = self.forward(images, use_multiview=use_mv, content_boxes=content_boxes)
 
         # Compute loss
         loss = self.criterion(logits, labels)

@@ -1,0 +1,2 @@
+[console_scripts]
+streetvision-train = scripts.train_cli:main

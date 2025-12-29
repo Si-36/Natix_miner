@@ -186,14 +186,79 @@ class MultiViewGenerator(nn.Module):
 
         return boxes
 
-    def forward(self, images: Tensor) -> Tensor:
+    def _generate_content_aware_roi_boxes(
+        self, content_boxes: Tensor, device: torch.device
+    ) -> Tensor:
         """
-        Generate crops from batch of images (ELITE: ZERO Python overhead!)
+        Generate per-sample tile ROI boxes inside content regions (2025-12-29)
 
-        Uses cached ROI boxes + roi_align for maximum performance.
+        CRITICAL: This is content-aware tiling - only tiles the content region,
+        skipping padding. Each sample can have different content box, so we
+        compute ROIs per-sample (no caching).
+
+        Args:
+            content_boxes: Content boxes [B, 4] in (x1, y1, x2, y2) format
+            device: Target device
+
+        Returns:
+            boxes: ROI boxes [B*num_tiles, 5] in format [batch_idx, x1, y1, x2, y2]
+        """
+        B = content_boxes.size(0)
+        rows, cols = self.grid_size
+        num_tiles = rows * cols
+
+        # Prepare output boxes [B*num_tiles, 5]
+        boxes = []
+
+        for b in range(B):
+            x1, y1, x2, y2 = content_boxes[b].tolist()
+            content_w = x2 - x1
+            content_h = y2 - y1
+
+            # Compute tile size with overlap (inside content region)
+            tile_h = content_h / rows
+            tile_w = content_w / cols
+
+            # Overlap in pixels
+            overlap_h = tile_h * self.overlap
+            overlap_w = tile_w * self.overlap
+
+            # Generate tile positions inside content box
+            for row in range(rows):
+                for col in range(cols):
+                    # Start position (relative to content box origin)
+                    tile_y1 = max(0, row * tile_h - overlap_h)
+                    tile_x1 = max(0, col * tile_w - overlap_w)
+
+                    # End position
+                    tile_y2 = min(content_h, (row + 1) * tile_h + overlap_h)
+                    tile_x2 = min(content_w, (col + 1) * tile_w + overlap_w)
+
+                    # Convert to absolute canvas coordinates
+                    abs_x1 = x1 + tile_x1
+                    abs_y1 = y1 + tile_y1
+                    abs_x2 = x1 + tile_x2
+                    abs_y2 = y1 + tile_y2
+
+                    # Append as [batch_idx, x1, y1, x2, y2]
+                    boxes.append([b, abs_x1, abs_y1, abs_x2, abs_y2])
+
+        # Convert to tensor
+        boxes_tensor = torch.tensor(boxes, dtype=torch.float32, device=device)
+        return boxes_tensor  # [B*num_tiles, 5]
+
+    def forward(self, images: Tensor, content_boxes: Optional[Tensor] = None) -> Tensor:
+        """
+        Generate crops from batch of images (2025-12-29 with content-aware tiling)
+
+        CRITICAL: Two paths for backward compatibility:
+        - If content_boxes is None: Use cached ROI path (fast, tiles full canvas)
+        - If content_boxes is not None: Content-aware path (tiles only content region)
 
         Args:
             images: Input images [B, C, H, W]
+            content_boxes: Optional content boxes [B, 4] in (x1, y1, x2, y2) format
+                          If provided, generates crops only inside content regions.
 
         Returns:
             crops: Generated crops [B, num_crops, C, crop_size, crop_size]
@@ -203,38 +268,88 @@ class MultiViewGenerator(nn.Module):
 
         B, C, H, W = images.shape
 
-        # 1. Global view (entire image resized) - batched
-        global_views = F.interpolate(
-            images,  # [B, C, H, W]
-            size=(self.crop_size, self.crop_size),
-            mode="bilinear",
-            align_corners=False,
-        )  # [B, C, crop_size, crop_size]
+        # PATH 1: Content-aware tiling (letterbox mode)
+        if content_boxes is not None:
+            if content_boxes.shape != (B, 4):
+                raise ValueError(
+                    f"Expected content_boxes of shape [B, 4], got {content_boxes.shape}"
+                )
 
-        # 2. Tile views using roi_align with CACHED boxes (ELITE: zero overhead!)
-        boxes_tensor = self._get_cached_roi_boxes(B, H, W, images.device)
+            # 1. Global view using roi_align (crop content region, resize to crop_size)
+            # Format content_boxes for roi_align: [B, 5] with batch indices
+            global_boxes = torch.cat(
+                [
+                    torch.arange(B, device=images.device).unsqueeze(1).float(),
+                    content_boxes,
+                ],
+                dim=1,
+            )  # [B, 5]
 
-        # Extract and resize all tiles in one batched operation!
-        tile_crops = roi_align(
-            images,
-            boxes_tensor,
-            output_size=(self.crop_size, self.crop_size),
-            spatial_scale=1.0,
-            aligned=True,
-        )  # [B*num_tiles, C, crop_size, crop_size]
+            global_views = roi_align(
+                images,
+                global_boxes,
+                output_size=(self.crop_size, self.crop_size),
+                spatial_scale=1.0,
+                aligned=True,
+            )  # [B, C, crop_size, crop_size]
 
-        # Reshape tiles to [B, num_tiles, C, crop_size, crop_size]
-        num_tiles = self.grid_size[0] * self.grid_size[1]
-        tile_crops = tile_crops.view(B, num_tiles, C, self.crop_size, self.crop_size)
+            # 2. Tile views using content-aware ROI generation
+            tile_boxes = self._generate_content_aware_roi_boxes(
+                content_boxes, images.device
+            )
 
-        # Concatenate global views with tile views
-        # global_views: [B, C, crop_size, crop_size] → [B, 1, C, crop_size, crop_size]
-        global_views = global_views.unsqueeze(1)
+            tile_crops = roi_align(
+                images,
+                tile_boxes,
+                output_size=(self.crop_size, self.crop_size),
+                spatial_scale=1.0,
+                aligned=True,
+            )  # [B*num_tiles, C, crop_size, crop_size]
 
-        # Concatenate: [B, 1, C, H, W] + [B, num_tiles, C, H, W] → [B, num_crops, C, H, W]
-        all_crops = torch.cat([global_views, tile_crops], dim=1)
+            # Reshape tiles to [B, num_tiles, C, crop_size, crop_size]
+            num_tiles = self.grid_size[0] * self.grid_size[1]
+            tile_crops = tile_crops.view(B, num_tiles, C, self.crop_size, self.crop_size)
 
-        return all_crops  # [B, num_crops, C, crop_size, crop_size]
+            # Concatenate global + tiles
+            global_views = global_views.unsqueeze(1)  # [B, 1, C, H, W]
+            all_crops = torch.cat([global_views, tile_crops], dim=1)
+
+            return all_crops  # [B, num_crops, C, crop_size, crop_size]
+
+        # PATH 2: Cached ROI path (legacy / backward compat)
+        else:
+            # 1. Global view (entire image resized) - batched
+            global_views = F.interpolate(
+                images,  # [B, C, H, W]
+                size=(self.crop_size, self.crop_size),
+                mode="bilinear",
+                align_corners=False,
+            )  # [B, C, crop_size, crop_size]
+
+            # 2. Tile views using roi_align with CACHED boxes (ELITE: zero overhead!)
+            boxes_tensor = self._get_cached_roi_boxes(B, H, W, images.device)
+
+            # Extract and resize all tiles in one batched operation!
+            tile_crops = roi_align(
+                images,
+                boxes_tensor,
+                output_size=(self.crop_size, self.crop_size),
+                spatial_scale=1.0,
+                aligned=True,
+            )  # [B*num_tiles, C, crop_size, crop_size]
+
+            # Reshape tiles to [B, num_tiles, C, crop_size, crop_size]
+            num_tiles = self.grid_size[0] * self.grid_size[1]
+            tile_crops = tile_crops.view(B, num_tiles, C, self.crop_size, self.crop_size)
+
+            # Concatenate global views with tile views
+            # global_views: [B, C, crop_size, crop_size] → [B, 1, C, crop_size, crop_size]
+            global_views = global_views.unsqueeze(1)
+
+            # Concatenate: [B, 1, C, H, W] + [B, num_tiles, C, H, W] → [B, num_crops, C, H, W]
+            all_crops = torch.cat([global_views, tile_crops], dim=1)
+
+            return all_crops  # [B, num_crops, C, crop_size, crop_size]
 
     @property
     def num_crops(self) -> int:
@@ -530,14 +645,16 @@ class MultiViewDINOv3(nn.Module):
             f"crop_size={crop_size}, grid_size={grid_size}, overlap={overlap:.1%}"
         )
 
-    def forward(self, images: Tensor) -> Tensor:
+    def forward(self, images: Tensor, content_boxes: Optional[Tensor] = None) -> Tensor:
         """
-        Multi-view forward pass (FULLY BATCHED - NO Python loops!)
+        Multi-view forward pass (2025-12-29 with content-aware tiling)
 
         CRITICAL: Returns LOGITS (not probabilities) - safe for CrossEntropyLoss
 
         Args:
             images: Input images [B, 3, H, W]
+            content_boxes: Optional content boxes [B, 4] in (x1, y1, x2, y2) format
+                          If provided, uses content-aware tiling (letterbox mode).
 
         Returns:
             aggregated_logits: Aggregated logits [B, num_classes]
@@ -547,8 +664,8 @@ class MultiViewDINOv3(nn.Module):
 
         B, C = images.size(0), images.size(1)
 
-        # Step 1: Generate crops for all images (BATCHED - NO loop!)
-        all_crops = self.generator(images)  # [B, num_crops, C, crop_size, crop_size]
+        # Step 1: Generate crops for all images (pass content_boxes through)
+        all_crops = self.generator(images, content_boxes=content_boxes)  # [B, num_crops, C, crop_size, crop_size]
 
         # Step 2: Flatten for batched processing (CRITICAL for speed!)
         crops_flat = all_crops.view(
