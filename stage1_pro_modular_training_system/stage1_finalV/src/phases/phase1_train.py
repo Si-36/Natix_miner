@@ -254,12 +254,34 @@ class TrainBaselineHeadSpec(StepSpec):
 
         artifacts_written = []
 
-        # Save model checkpoint
+        # 🔥 CRITICAL: Save checkpoint with proper contract (state_dict + config wrapper)
         checkpoint_path = ctx.artifact_store.get(ArtifactKey.MODEL_CHECKPOINT, ctx.run_id)
-        torch.save(model.state_dict(), checkpoint_path)
-        ctx.artifact_store.put(ArtifactKey.MODEL_CHECKPOINT, model.state_dict(), ctx.run_id)
+
+        # Create checkpoint with proper format
+        checkpoint = {
+            "state_dict": model.state_dict(),
+            "config": {
+                "model_id": model_id,
+                "hidden_dim": hidden_dim,
+                "num_classes": num_classes,
+                "dropout": dropout,
+                "batch_size": batch_size,
+                "learning_rate": learning_rate,
+                "max_epochs": max_epochs,
+                "freeze_backbone": freeze_backbone,
+            },
+            "metadata": {
+                "epoch": 1,  # Demo: just 1 epoch
+                "step_id": "train_baseline_head",
+                "timestamp": str(Path.cwd().stat().st_mtime),
+            },
+        }
+
+        # Save via ArtifactStore (will detect tensors and use torch.save)
+        ctx.artifact_store.put(ArtifactKey.MODEL_CHECKPOINT, checkpoint, ctx.run_id)
         artifacts_written.append(ArtifactKey.MODEL_CHECKPOINT)
         print(f"   ✅ Checkpoint saved: {checkpoint_path}")
+        print(f"      Format: state_dict + config wrapper (leak-proof!)")
 
         # Save val_select logits
         logits_path = ctx.artifact_store.get(ArtifactKey.VAL_SELECT_LOGITS, ctx.run_id)

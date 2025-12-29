@@ -61,37 +61,68 @@ def test_export_calib_logits_step():
     print("=" * 70)
 
     # Get step spec
-    step_spec = get_step_spec("export_calib_logits")
+    step_spec_class = get_step_spec("export_calib_logits")
 
-    if step_spec is None:
+    if step_spec_class is None:
         raise RuntimeError("export_calib_logits step not found in registry!")
 
+    # 🔥 CRITICAL: Instantiate spec to access instance attributes
+    step_spec = step_spec_class()
     print(f"   📋 Step spec loaded: {step_spec.name}")
 
     # Create artifact store
     artifact_root = Path(__file__).parent.parent / "test_artifacts"
     store = ArtifactStore(artifact_root)
 
-    # Create manifest
+    # Create manifest with JSON-safe config (minimal primitive dict only!)
     run_id = "test_run_001"
-    config = {"step": vars(step_spec)}
+    config = {
+        "step": {
+            "step_id": step_spec.step_id,
+            "name": step_spec.name,
+            "deps": list(step_spec.deps),
+            "order_index": step_spec.order_index,
+        }  # 🔥 Only primitive types (no functions/methods!)
+    }
     manifest_path = store.initialize_manifest(run_id, config)
 
     print(f"   📊 Manifest initialized: {run_id}")
 
-    # Create step context
-    ctx = StepContext(
+    # 🔥 CRITICAL: Register step in manifest before finalizing!
+    store.update_step(
         step_id="export_calib_logits",
-        config=config,
-        run_id=run_id,
-        artifact_root=artifact_root,
-        artifact_store=store,
-        manifest=store._manifest,
+        status="running",
         metadata={
             "test": True,
             "description": "Mock test for export_calib_logits",
         },
     )
+    print(f"   ✅ Step registered in manifest: export_calib_logits")
+
+    # Create step context
+    ctx = StepContext(
+        step_id="sweep_thresholds",
+        config=config,
+        run_id=run_id,
+        artifact_root=store.artifact_root,
+        artifact_store=store,
+        manifest=store._manifest,
+        metadata={
+            "test": True,
+            "description": "Mock test for sweep_thresholds",
+        },
+    )
+
+    # 🔥 CRITICAL: Register step in manifest before finalizing!
+    store.update_step(
+        step_id="sweep_thresholds",
+        status="running",
+        metadata={
+            "test": True,
+            "description": "Mock test for sweep_thresholds",
+        },
+    )
+    print(f"   ✅ Step registered in manifest: sweep_thresholds")
 
     # 🔥 LEAK-PROOF: Enforce split contract
     used_splits = frozenset({Split.VAL_CALIB})  # VAL_CALIB ONLY!
@@ -100,7 +131,7 @@ def test_export_calib_logits_step():
     assert_allowed(
         used=used_splits,
         allowed=step_spec.allowed_splits(),
-        context="export_calib_logits.run()",
+        context="sweep_thresholds.run()",
     )
     print(f"   ✅ Split contract validated")
 
@@ -129,6 +160,10 @@ def test_export_calib_logits_step():
     )
 
     # Finalize step
+    # 🔥 CRITICAL: Initialize step in manifest before finalizing
+    if "steps" not in store._manifest:
+        store._manifest["steps"] = {}
+
     store.finalize_step(
         step_id="export_calib_logits",
         status="completed",
@@ -159,17 +194,24 @@ def test_sweep_thresholds_step(run_id: str, store: ArtifactStore):
     print("=" * 70)
 
     # Get step spec
-    step_spec = get_step_spec("sweep_thresholds")
+    step_spec_class = get_step_spec("sweep_thresholds")
 
-    if step_spec is None:
+    if step_spec_class is None:
         raise RuntimeError("sweep_thresholds step not found in registry!")
 
+    # 🔥 CRITICAL: Instantiate spec to access instance attributes
+    step_spec = step_spec_class()
     print(f"   📋 Step spec loaded: {step_spec.name}")
     print(f"   🔗 Dependencies: {step_spec.deps}")
 
-    # Create step context
+    # Create step context with JSON-safe config
     config = {
-        "step": step_spec.__dict__(),
+        "step": {
+            "step_id": step_spec.step_id,
+            "name": step_spec.name,
+            "deps": list(step_spec.deps),
+            "order_index": step_spec.order_index,
+        },  # 🔥 Only primitive types (no functions/methods!)
         "sweep": {
             "target_fnr": 0.05,  # Target 5% FNR
         },
@@ -262,14 +304,16 @@ def test_dag_resolution():
     print("=" * 70)
 
     # Test export_calib_logits dependencies
-    export_spec = get_step_spec("export_calib_logits")
+    export_spec_class = get_step_spec("export_calib_logits")
+    export_spec = export_spec_class()  # 🔥 Instantiate to access instance attributes
 
-    print(f"   📋 export_calib_logits:")
+    print(f"\n   📋 export_calib_logits:")
     print(f"      Dependencies: {export_spec.deps}")
     print(f"      Allowed splits: {sorted(list(export_spec.allowed_splits()))}")
 
     # Test sweep_thresholds dependencies
-    sweep_spec = get_step_spec("sweep_thresholds")
+    sweep_spec_class = get_step_spec("sweep_thresholds")
+    sweep_spec = sweep_spec_class()  # 🔥 Instantiate to access instance attributes
 
     print(f"\n   📋 sweep_thresholds:")
     print(f"      Dependencies: {sweep_spec.deps}")
@@ -291,9 +335,10 @@ def test_dag_resolution():
     for i, step in enumerate(execution_order, 1):
         print(f"      {i}. {step}")
 
-    # Verify order is correct
-    assert execution_order[0] == "export_calib_logits", "First step should be export_calib_logits"
-    assert execution_order[1] == "sweep_thresholds", "Second step should be sweep_thresholds"
+    # Verify order is correct (train_baseline_head first since it has no deps)
+    assert execution_order[0] == "train_baseline_head", "First step should be train_baseline_head"
+    assert execution_order[1] == "export_calib_logits", "Second step should be export_calib_logits"
+    assert execution_order[2] == "sweep_thresholds", "Third step should be sweep_thresholds"
 
     print(f"\n   ✅ DAG resolution is correct")
     print("=" * 70)

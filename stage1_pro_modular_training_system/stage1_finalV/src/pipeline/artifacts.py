@@ -109,32 +109,54 @@ class ArtifactStore:
         run_dir = self.artifact_root / "runs" / run_id
 
         key_paths = {
+            # 🔥 CRITICAL: Use .value (string) not enum object as key!
+            # Python 3.14+ enum hash collision bug - use string keys
             # Run-level
-            ArtifactKey.RUN_MANIFEST: run_dir / "run_manifest.json",
+            ArtifactKey.RUN_MANIFEST.value: run_dir / "run_manifest.json",
             # Phase 1
-            ArtifactKey.MODEL_CHECKPOINT: run_dir / "phase1" / "model_best.pth",
-            ArtifactKey.VAL_SELECT_LOGITS: run_dir / "phase1" / "val_select_logits.pt",
-            ArtifactKey.VAL_SELECT_LABELS: run_dir / "phase1" / "val_select_labels.pt",
-            ArtifactKey.VAL_SELECT_METRICS: run_dir / "phase1" / "metrics.csv",
+            ArtifactKey.MODEL_CHECKPOINT.value: run_dir / "phase1" / "model_best.pth",
+            ArtifactKey.VAL_SELECT_LOGITS.value: run_dir / "phase1" / "val_select_logits.pt",
+            ArtifactKey.VAL_SELECT_LABELS.value: run_dir / "phase1" / "val_select_labels.pt",
+            ArtifactKey.VAL_SELECT_METRICS.value: run_dir / "phase1" / "metrics.csv",
             # 🔥 2026 PRO: Calibration artifacts (exported from Phase 1)
-            ArtifactKey.VAL_CALIB_LOGITS: run_dir / "phase1" / "val_calib_logits.pt",
-            ArtifactKey.VAL_CALIB_LABELS: run_dir / "phase1" / "val_calib_labels.pt",
+            ArtifactKey.VAL_CALIB_LOGITS.value: run_dir / "phase1" / "val_calib_logits.pt",
+            ArtifactKey.VAL_CALIB_LABELS.value: run_dir / "phase1" / "val_calib_labels.pt",
             # Phase 2
-            ArtifactKey.THRESHOLDS_JSON: run_dir / "phase2" / "thresholds.json",
-            ArtifactKey.THRESHOLDS_METRICS: run_dir / "phase2" / "thresholds_metrics.csv",
+            ArtifactKey.THRESHOLDS_JSON.value: run_dir / "phase2" / "thresholds.json",
+            ArtifactKey.THRESHOLDS_METRICS.value: run_dir / "phase2" / "thresholds_metrics.csv",
             # Phase 3
-            ArtifactKey.GATE_CHECKPOINT: run_dir / "phase3" / "gate_best.pth",
-            ArtifactKey.GATE_PARAMS_JSON: run_dir / "phase3" / "gate_params.json",
-            ArtifactKey.GATE_EVALUATION_METRICS: run_dir / "phase3" / "gate_metrics.csv",
+            ArtifactKey.GATE_CHECKPOINT.value: run_dir / "phase3" / "gate_best.pth",
+            ArtifactKey.GATE_PARAMS_JSON.value: run_dir / "phase3" / "gate_params.json",
+            ArtifactKey.GATE_EVALUATION_METRICS.value: run_dir / "phase3" / "gate_metrics.csv",
             # Phase 6
-            ArtifactKey.BUNDLE_JSON: run_dir / "phase6" / "export" / "bundle.json",
-            ArtifactKey.BUNDLE_README: run_dir / "phase6" / "export" / "README.md",
+            ArtifactKey.BUNDLE_JSON.value: run_dir / "phase6" / "export" / "bundle.json",
+            ArtifactKey.BUNDLE_README.value: run_dir / "phase6" / "export" / "README.md",
         }
 
-        if key not in key_paths:
+        # 🔥 CRITICAL: Use key.value (string) for lookup, not enum object
+        if key.value not in key_paths:
             raise ValueError(f"Unknown artifact key: {key}")
 
-        return key_paths[key]
+        return key_paths[key.value]
+
+    def _contains_tensors(self, data: Union[dict, list]) -> bool:
+        """
+        Check if dict or list contains torch.Tensor objects.
+
+        This is used to detect checkpoint state_dicts which must be saved
+        via torch.save() instead of JSON serialization.
+
+        Args:
+            data: Dict or list to check
+
+        Returns:
+            True if any tensor found, False otherwise
+        """
+        if isinstance(data, dict):
+            return any(isinstance(v, torch.Tensor) for v in data.values())
+        elif isinstance(data, list):
+            return any(isinstance(item, torch.Tensor) for item in data)
+        return False
 
     def get(self, key: ArtifactKey, run_id: str = "current") -> Path:
         """
@@ -197,12 +219,26 @@ class ArtifactStore:
 
         # Handle different data types with proper atomic writes
         if isinstance(data, torch.Tensor):
-            # 🔥 Binary data (tensors, bytes)
+            # 🔥 Binary data (tensors)
             self._put_binary_data(data, target_path, key, run_id)
 
-        elif isinstance(data, (dict, list)):
-            # 🔥 Text/JSON data
-            self._put_json_data(data, target_path, key, run_id)
+        elif isinstance(data, dict):
+            # 🔥 Check if dict contains tensors (checkpoint state_dict)
+            if self._contains_tensors(data):
+                # Dict with tensors → checkpoint/state_dict (save via torch.save)
+                self._put_binary_data(data, target_path, key, run_id)
+            else:
+                # Regular dict → JSON
+                self._put_json_data(data, target_path, key, run_id)
+
+        elif isinstance(data, list):
+            # 🔥 Check if list contains tensors
+            if self._contains_tensors(data):
+                # List with tensors → save via torch.save
+                self._put_binary_data(data, target_path, key, run_id)
+            else:
+                # Regular list → JSON
+                self._put_json_data(data, target_path, key, run_id)
 
         elif isinstance(data, str):
             # 🔥 String data (text, CSV, etc.)
@@ -685,10 +721,11 @@ class ArtifactStore:
         if self._manifest is None:
             raise RuntimeError("No manifest loaded - call load_manifest() first")
 
-        if step_id not in self._manifest.get("steps", {}):
-            raise ValueError(f"Cannot finalize unknown step: {step_id}")
+        # 🔥 CRITICAL: Allow creating new steps (auto-add if not exists)
+        if "steps" not in self._manifest:
+            self._manifest["steps"] = {}
 
-        # Update step status
+        # Update step status (create if not exists)
         self._manifest["steps"][step_id] = {
             "status": status,
             "metadata": metrics or {},

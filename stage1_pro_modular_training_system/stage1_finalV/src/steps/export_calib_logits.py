@@ -115,6 +115,14 @@ class ExportCalibLogitsSpec(StepSpec):
         used_splits = frozenset({Split.VAL_CALIB})
         print(f"   🔒 Enforcing split contract: {sorted(list(used_splits))}")
 
+        # 🔥 CRITICAL: Actually enforce split contract (fail-fast if violated!)
+        assert_allowed(
+            used=used_splits,
+            allowed=self.allowed_splits(),
+            context="export_calib_logits.run()",
+        )
+        print(f"   ✅ Split contract enforced")
+
         # Load trained checkpoint
         print(f"\n   📖 Loading trained checkpoint...")
         print("-" * 70)
@@ -127,6 +135,23 @@ class ExportCalibLogitsSpec(StepSpec):
 
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
         print(f"   ✅ Checkpoint loaded")
+
+        # 🔥 CRITICAL: Handle checkpoint format properly
+        # Standard format: {"state_dict": dict, "config": dict}
+        # Legacy format: state_dict only (no wrapper)
+        if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+            # New format with explicit state_dict + config wrapper
+            state_dict = checkpoint["state_dict"]
+            checkpoint_config = checkpoint.get("config", {})
+            print(f"   📋 Using new checkpoint format (state_dict + config)")
+        elif isinstance(checkpoint, dict):
+            # Legacy format: checkpoint IS the state_dict
+            # Try to extract config if available, otherwise use defaults
+            state_dict = checkpoint
+            checkpoint_config = checkpoint.get("config", {}) if "config" in checkpoint else {}
+            print(f"   📋 Using legacy checkpoint format (state_dict only)")
+        else:
+            raise RuntimeError(f"Unsupported checkpoint format: {type(checkpoint)}")
 
         # Reconstruct model from checkpoint
         print(f"\n   🔧 Reconstructing model from checkpoint...")
@@ -166,6 +191,10 @@ class ExportCalibLogitsSpec(StepSpec):
         # Combine models
         model = nn.Sequential(backbone, head)
         print(f"   🧠 Model assembled: {type(model).__name__}")
+
+        # 🔥 CRITICAL: Load checkpoint weights into model
+        model.load_state_dict(state_dict)
+        print(f"   ✅ Checkpoint weights loaded into model")
 
         # Set to eval mode
         model.eval()
