@@ -50,12 +50,14 @@ class StepRegistry:
         from steps.export_calib_logits import ExportCalibLogitsSpec
         from steps.sweep_thresholds import SweepThresholdsSpec
         from steps.train_baseline_head import TrainBaselineHeadSpec
+        from steps.train_explora_head import TrainExploraHeadSpec
 
         # Register steps
         self._step_specs = {
             "train_baseline_head": TrainBaselineHeadSpec,
             "export_calib_logits": ExportCalibLogitsSpec,
             "sweep_thresholds": SweepThresholdsSpec,
+            "train_explora_head": TrainExploraHeadSpec,
         }
 
         # Build dependency graph

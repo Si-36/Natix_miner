@@ -8,7 +8,7 @@
 torch==2.6.0
 lightning==2.4.0
 pytorch-lightning==2.4.0
-transformers==4.56.0  # ✅ Official DINOv3 support (AutoModel, AutoImageProcessor)
+transformers==4.57.0  # ✅ Official DINOv3 support (AutoModel, AutoImageProcessor)
 
 # ==============================================================================
 # CONFIGURATION
@@ -22,7 +22,7 @@ pydantic-settings==2.5.0
 # ==============================================================================
 # DATA PROCESSING
 # ==============================================================================
-torchvision==0.20.0
+torchvision==0.21.0
 timm==1.0.12
 albumentations==1.4.24
 pandas==2.2.3
@@ -32,6 +32,11 @@ numpy==2.2.0
 # MODEL OPTIMIZATIONS (2025)
 # ==============================================================================
 flash-attn==3.0.0
+
+# ==============================================================================
+# PARAMETER-EFFICIENT TRAINING (PEFT)
+# ==============================================================================
+peft>=0.13.0
 
 # ==============================================================================
 # METRICS & EVALUATION

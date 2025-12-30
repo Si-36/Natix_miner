@@ -34,7 +34,12 @@ def parse_args():
         "--target_step",
         type=str,
         default="sweep_thresholds",
-        choices=["train_baseline_head", "export_calib_logits", "sweep_thresholds"],
+        choices=[
+            "train_baseline_head",
+            "train_explora_head",
+            "export_calib_logits",
+            "sweep_thresholds",
+        ],
         help="Target step to run (default: sweep_thresholds, runs full pipeline to target)",
     )
 
