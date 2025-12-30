@@ -232,13 +232,18 @@ def test_real_e2e_pipeline():
         import json
 
         with open(manifest_path, "r") as f:
-            manifest = json.load(f)
+            manifest_data = json.load(f)
 
-        print(f"   📋 Manifest loaded: {sorted(manifest.get('steps', {}).keys())}")
+        if manifest_data is None:
+            print(f"   ❌ FAILED: manifest file is None")
+            return
+
+        steps_in_manifest = set(manifest_data.get("steps", {}).keys())
+        print(f"   📋 Manifest loaded: {sorted(steps_in_manifest)}")
 
         # Verify all 3 steps completed
         steps_expected = ["train_baseline_head", "export_calib_logits", "sweep_thresholds"]
-        steps_in_manifest = set(manifest.get("steps", {}).keys())
+        steps_in_manifest = set(manifest_data.get("steps", {}).keys())
 
         if not steps_expected.issubset(steps_in_manifest):
             missing = steps_expected - steps_in_manifest
@@ -247,12 +252,12 @@ def test_real_e2e_pipeline():
 
         # Verify all steps have correct status
         for step_name in steps_in_manifest:
-            step_info = manifest["steps"][step_name]
+            step_info = manifest_data["steps"][step_name]
             if step_info.get("status") != "completed":
                 print(f"   ❌ FAILED: {step_name} status is {step_info.get('status')}")
                 all_exist = False
 
-        print(f"\n   📋 Steps tracked: {list(manifest.get('steps', {}).keys())}")
+        print(f"\n   📋 Steps tracked: {sorted(manifest_data.get('steps', {}).keys())}")
 
         # Verify checkpoint contract
         checkpoint_path = artifact_store.get(ArtifactKey.MODEL_CHECKPOINT, run_id=run_id)

@@ -1,139 +1,220 @@
 #!/usr/bin/env python3
 """
-🔥 **PyTorch Lightning 2.4 CLI - Production Grade**
-Complete training script following 2025/2026 best practices
+Tier 0 CLI - Training Pipeline Entry Point
+
+This script provides a simple CLI to run the modular training pipeline.
+It uses DAG engine to orchestrate train → export → sweep.
+
+Usage:
+    python scripts/train.py --target_step sweep_thresholds --training.num_epochs 1
+    python scripts/train.py --data.synthetic --training.num_epochs 10
 """
 
 import sys
+import argparse
 from pathlib import Path
+from typing import Optional
+from datetime import datetime
 
-import lightning as L
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, LearningRateMonitor, DeviceStatsMonitor
-from lightning.pytorch.tuner import Tuner
+# Add src to path (use absolute path from project root)
+_project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(_project_root / "src"))
 
-# Add parent to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+from pipeline.artifacts import ArtifactStore, ArtifactKey
+from pipeline.contracts import Split, assert_allowed
+from pipeline.step_api import StepContext, StepSpec
+from pipeline.manifest import RunManifest
+from pipeline.registry import StepRegistry, resolve_execution_order
 
-# Create configs
-def phase1_config():
-    """Default Phase 1 config"""
-    return dict(
-        # Data config
-        data=dict(
-            batch_size=32,
-            num_workers=4,
-            image_size=224,
-            pin_memory=True,
-        ),
-        
-        # Model config
-        model=dict(
-            backbone=dict(
-                model_name="dinov2_vitb14",
-                pretrained=True,
-                freeze_backbone=False,
-                compile_model=True,
-                use_flash_attn=False,
-            ),
-            head=dict(
-                hidden_dim=768,
-                num_classes=2,
-                dropout=0.1,
-                use_multi_head=False,
-            ),
-            multi_view=dict(
-                use_multi_view=False,
-                tile_size=224,
-                overlap=0.125,
-                use_tta=False,
-                aggregation_method="attention",
-            ),
-        ),
-        
-        # Training config
-        training=dict(
-            num_epochs=50,
-            optimizer=dict(
-                name="adamw",
-                lr=1e-4,
-                weight_decay=0.05,
-                betas=[0.9, 0.999],
-                eps=1e-8,
-            ),
-            loss=dict(
-                name="cross_entropy",
-                label_smoothing=0.0,
-            ),
-            scheduler=dict(
-                name="cosine",
-                min_lr=1e-6,
-                warmup_epochs=5,
-            ),
-            early_stopping=True,
-            early_stopping_patience=10,
-            early_stopping_monitor="val_select/accuracy",
-            save_top_k=1,
-            save_last=True,
-            gradient_clip_val=1.0,
-            accumulate_grad_batches=1,
-        ),
-        
-        # Validation config
-        validation=dict(
-            target_fnr_exit=0.02,
-            min_coverage=0.70,
-        ),
-        
-        # Output config
-        output=dict(
-            checkpoint_dir="outputs/checkpoints",
-            log_dir="logs",
-        ),
+# Import steps
+from steps.train_baseline_head import TrainBaselineHeadSpec
+from steps.export_calib_logits import ExportCalibLogitsSpec
+from steps.sweep_thresholds import SweepThresholdsSpec
+
+# Global registry
+_step_registry = StepRegistry()
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Tier 0 Training Pipeline - Modular DAG-based training system",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+
+    parser.add_argument(
+        "--target_step",
+        type=str,
+        default="sweep_thresholds",
+        choices=["train_baseline_head", "export_calib_logits", "sweep_thresholds"],
+        help="Target step to run (default: sweep_thresholds, runs full pipeline to target)",
+    )
+
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=1,
+        help="Number of training epochs (default: 1, smoke test)",
+    )
+
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=32,
+        help="Batch size (default: 32)",
+    )
+
+    parser.add_argument(
+        "--learning_rate",
+        type=float,
+        default=1e-4,
+        help="Learning rate (default: 1e-4)",
+    )
+
+    parser.add_argument(
+        "--synthetic",
+        action="store_true",
+        help="Use synthetic/mock data instead of real dataset",
+    )
+
+    parser.add_argument(
+        "--run_id",
+        type=str,
+        default=None,
+        help="Override run ID (default: auto-generated)",
+    )
+
+    parser.add_argument(
+        "--artifact_root",
+        type=str,
+        default="runs",
+        help="Root directory for artifacts (default: runs)",
+    )
+
+    return parser.parse_args()
+
+
+def generate_run_id() -> str:
+    now = datetime.now()
+    return now.strftime("%Y%m%dT%H%M%S")
+
+
+def run_pipeline(args):
+    print("=" * 70)
+    print("Tier 0 Training Pipeline")
+    print("=" * 70)
+    print()
+
+    if args.run_id:
+        run_id = args.run_id
+    else:
+        run_id = generate_run_id()
+
+    print(f"📋 Run ID: {run_id}")
+    print()
+
+    config = {
+        "model_id": "facebook/dinov3-vits16-pretrain-lvd1689m",
+        "hidden_dim": 384,
+        "num_classes": 2,
+        "dropout": 0.1,
+        "freeze_backbone": True,
+        "training_max_epochs": args.epochs,
+        "training_batch_size": args.batch_size,
+        "training_learning_rate": args.learning_rate,
+        "data_synthetic": args.synthetic,
+    }
+
+    print(f"\n⚙️ Final config:")
+    print(f"   Model ID: {config['model_id']}")
+    print(f"   Hidden dim: {config['hidden_dim']}")
+    print(f"   Num classes: {config['num_classes']}")
+    print(f"   Max epochs: {config['training_max_epochs']}")
+    print(f"   Batch size: {config['training_batch_size']}")
+    print(f"   Learning rate: {config['training_learning_rate']}")
+    print(f"   Synthetic data: {config['data_synthetic']}")
+    print()
+
+    artifact_root = Path(args.artifact_root)
+    artifact_root.mkdir(parents=True, exist_ok=True)
+
+    artifact_store = ArtifactStore(artifact_root)
+    print(f"💾 Artifact root: {artifact_root}")
+    print()
+
+    manifest = RunManifest(
+        run_id=run_id,
+        resolved_config=config,
+    )
+    print(f"📊 Manifest initialized: {run_id}")
+    print()
+
+    target_step = args.target_step
+    print(f"🎯 Target step: {target_step}")
+    print()
+
+    try:
+        execution_order = _step_registry.resolve_execution_order(target_step)
+    except ValueError as e:
+        print(f"❌ DAG resolution failed: {e}")
+        sys.exit(1)
+
+    print(f"🔗 Execution order: {' → '.join(execution_order)}")
+    print()
+
+    for step_name in execution_order:
+        print("=" * 70)
+        print(f"🎯 Running step: {step_name}")
+        print("-" * 70)
+
+        step_spec_class = _step_registry._step_specs[step_name]
+        ctx = StepContext(
+            step_id=step_name,
+            config=config,
+            run_id=run_id,
+            artifact_root=artifact_root,
+            artifact_store=artifact_store,
+            manifest=manifest,
+            metadata={"cli": True, "target_step": target_step},
+        )
+
+        try:
+            step_spec = step_spec_class()
+            result = step_spec.run(ctx)
+
+            print(f"✅ Step completed: {step_name}")
+            print(f"   Artifacts written: {result.artifacts_written}")
+            print(f"   Splits used: {result.splits_used}")
+            print()
+
+        except Exception as e:
+            print(f"❌ Step failed: {step_name}")
+            print(f"   Error: {e}")
+            import traceback
+
+            traceback.print_exc()
+            sys.exit(1)
+
+    print("=" * 70)
+    print("🎉 Pipeline completed successfully!")
+    print("=" * 70)
+    print()
+
+    print("📊 Artifacts created:")
+    for step_name in execution_order:
+        step_info = manifest._steps.get(step_name, {})
+        if step_info and "artifacts" in step_info:
+            for artifact_key in step_info["artifacts"]:
+                path = artifact_store.get(ArtifactKey[artifact_key], run_id=run_id)
+                if path and path.exists():
+                    print(f"   ✅ {artifact_key}: {path}")
+
+    print()
+    print("Run complete! ✅")
 
 
 def main():
-    import argparse
-    
-    parser = argparse.ArgumentParser(
-        description="Stage-1 Pro Training System - PyTorch Lightning 2.4 (2025 Best Practices)",
-    )
-    
-    parser.add_argument("--phase", type=int, choices=[1,2,3,4,5,6], required=True,
-                       help="Training phase (1-6)")
-    parser.add_argument("--output_dir", type=str, required=True,
-                       help="Output directory for checkpoints/logs")
-    parser.add_argument("--epochs", type=int, default=50,
-                       help="Number of epochs")
-    parser.add_argument("--batch_size", type=int, default=32,
-                       help="Batch size")
-    parser.add_argument("--lr", type=float, default=1e-4,
-                       help="Learning rate")
-    parser.add_argument("--compile", action="store_true", default=True,
-                       help="Use torch.compile (30-50% speedup)")
-    parser.add_argument("--use_flash_attn", action="store_true",
-                       help="Use Flash Attention 3")
-    parser.add_argument("--use_multi_view", action="store_true",
-                       help="Enable multi-view inference")
-    
-    args = parser.parse_args()
-    
-    # Print header
-    print(f"\n{'='*80}")
-    print(f"🔥 Stage-1 Pro Training System - PyTorch Lightning 2.4")
-    print(f"Phase: {args.phase}")
-    print(f"Output dir: {args.output_dir}")
-    print(f"Epochs: {args.epochs}")
-    print(f"Batch size: {args.batch_size}")
-    print(f"Learning rate: {args.lr}")
-    print(f"Compile: {args.compile}")
-    print(f"Flash Attention: {args.use_flash_attn}")
-    print(f"Multi-view: {args.use_multi_view}")
-    print(f"{'='*80}\n")
-    
-    print("✅ Phase 1 config loaded!")
-    print(f"📝 To train: python scripts/train.py --phase 1 --output_dir outputs/phase1")
-    print(f"📝 For more options: python scripts/train.py --help")
+    args = parse_args()
+    run_pipeline(args)
 
 
 if __name__ == "__main__":

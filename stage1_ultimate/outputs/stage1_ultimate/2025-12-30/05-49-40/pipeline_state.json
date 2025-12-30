@@ -1,0 +1,15 @@
+{
+  "executions": {
+    "phase1_baseline": {
+      "phase_type": "phase1_baseline",
+      "status": "completed",
+      "start_time": 1767061180.5530655,
+      "end_time": 1767061332.2878108,
+      "duration_seconds": 151.73474526405334,
+      "duration_minutes": 2.5289124210675555,
+      "error_message": null
+    }
+  },
+  "start_time": 1767061180.5529487,
+  "end_time": 1767061332.2884784
+}
