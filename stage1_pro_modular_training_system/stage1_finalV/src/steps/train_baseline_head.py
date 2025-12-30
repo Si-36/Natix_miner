@@ -17,6 +17,8 @@ import torch.optim as optim
 from pipeline.artifacts import ArtifactStore, ArtifactKey
 from pipeline.contracts import Split, assert_allowed, SplitPolicy
 from pipeline.step_api import StepSpec, StepContext, StepResult
+from models.backbone import DINOv3Backbone
+from models.head import Stage1Head
 
 
 @dataclass
@@ -204,7 +206,7 @@ class TrainBaselineHeadSpec(StepSpec):
             class MockDataset(torch.utils.data.Dataset):
                 def __init__(self):
                     self.samples = [
-                        (torch.randn(3, 224, dtype=torch.float32), torch.randint(0, 2, (1,)))
+                        (torch.randn(3, 224, 224, dtype=torch.float32), torch.randint(0, 2, (1,)))
                         for _ in range(10)
                     ]
 
@@ -230,14 +232,21 @@ class TrainBaselineHeadSpec(StepSpec):
         print(f"\n   🏗️  Creating Lightning module...")
         print("-" * 70)
 
-        from training.lightning_module import Phase1LightningModule
+        from training.lightning_module import Phase1LightningModule, Phase1LightningModuleConfig
 
-        lightning_module = Phase1LightningModule(
+        # Create config object
+        module_config = Phase1LightningModuleConfig(
             model_id=model_id,
             freeze_backbone=freeze_backbone,
             hidden_dim=hidden_dim,
             num_classes=num_classes,
             dropout=dropout,
+            precision="bf16",
+        )
+
+        lightning_module = Phase1LightningModule(
+            config=module_config,
+            artifact_store=ctx.artifact_store,
         )
 
         # Setup device
@@ -245,15 +254,15 @@ class TrainBaselineHeadSpec(StepSpec):
         lightning_module = lightning_module.to(device)
         print(f"   ✅ Model created and moved to device: {device}")
 
-        # Setup optimizer
-        optimizer = optim.AdamW(
-            list(lightning_module.parameters()),
-            lr=learning_rate,
-            weight_decay=weight_decay,
+        # Setup model (create backbone, head, model, criterion, optimizer)
+        lightning_module.setup(
+            train_loader=train_loader_dict.get("train"),
+            val_select_loader=train_loader_dict.get("val_select"),
         )
 
-        # Setup loss function
-        criterion = nn.CrossEntropyLoss()
+        # Get optimizer and criterion from module (already created in setup())
+        optimizer = lightning_module.optimizer
+        criterion = lightning_module.criterion
 
         # Train for specified epochs (SMOKE TEST = 1 epoch)
         print(f"\n   🚀 Training for {max_epochs} epoch(s)...")
@@ -270,7 +279,7 @@ class TrainBaselineHeadSpec(StepSpec):
             # Train loop
             for batch_idx, (images, labels) in enumerate(train_loader_dict["train"]):
                 images = images.to(device)
-                labels = labels.to(device)
+                labels = labels.to(device).squeeze()  # (B, 1) -> (B,)
 
                 # Forward pass
                 logits = lightning_module(images)
@@ -299,7 +308,7 @@ class TrainBaselineHeadSpec(StepSpec):
             with torch.no_grad():
                 for batch_idx, (images, labels) in enumerate(train_loader_dict["val_select"]):
                     images = images.to(device)
-                    labels = labels.to(device)
+                    labels = labels.to(device).squeeze()  # (B, 1) -> (B,)
 
                     logits = lightning_module(images)
                     loss = criterion(logits, labels)
@@ -330,8 +339,32 @@ class TrainBaselineHeadSpec(StepSpec):
         print(f"\n   💾 Building checkpoint with correct format...")
         print("-" * 70)
 
+        # Just save the trained lightning_module directly
+        # It already has correct structure from setup()
+        model_wrapper = nn.Sequential(lightning_module.backbone, lightning_module.head)
+
         checkpoint = {
-            "state_dict": lightning_module.state_dict(),
+            "state_dict": model_wrapper.state_dict(),
+            "config": {
+                "model_id": model_id,
+                "hidden_dim": hidden_dim,
+                "num_classes": num_classes,
+                "dropout": dropout,
+                "freeze_backbone": freeze_backbone,
+                "batch_size": batch_size,
+                "learning_rate": learning_rate,
+                "max_epochs": max_epochs,
+            },
+            "metadata": {
+                "epoch": max_epochs,
+                "step_id": self.step_id,
+                "timestamp": str(Path.cwd().stat().st_mtime),
+                "has_real_data": has_real_data,
+            },
+        }
+
+        checkpoint = {
+            "state_dict": model_wrapper.state_dict(),
             "config": {
                 "model_id": model_id,
                 "hidden_dim": hidden_dim,

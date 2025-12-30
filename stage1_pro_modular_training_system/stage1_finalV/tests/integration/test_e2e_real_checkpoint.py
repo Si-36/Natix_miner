@@ -15,14 +15,12 @@ from pipeline.artifacts import ArtifactStore, ArtifactKey
 from pipeline.contracts import Split, assert_allowed
 from pipeline.step_api import StepSpec, StepContext, StepResult
 from pipeline.registry import resolve_execution_order
+from pipeline.manifest import RunManifest
 
-# Import all steps from pipeline package
-from pipeline import __all__
-
-# Get step spec classes
-TrainBaselineHeadSpec = __all__.TrainBaselineHeadSpec
-ExportCalibLogitsSpec = __all__.ExportCalibLogitsSpec
-SweepThresholdsSpec = __all__.SweepThresholdsSpec
+# Import step spec classes
+from steps.train_baseline_head import TrainBaselineHeadSpec
+from steps.export_calib_logits import ExportCalibLogitsSpec
+from steps.sweep_thresholds import SweepThresholdsSpec
 
 
 def test_real_e2e_pipeline():
@@ -48,8 +46,16 @@ def test_real_e2e_pipeline():
     with tempfile.TemporaryDirectory() as tmpdir:
         artifact_store = ArtifactStore(Path(tmpdir))
 
-        # Run ID
-        run_id = "test_real_e2e_pipeline"
+        # Run ID (unique per run to avoid caching issues)
+        import time
+
+        run_id = f"e2e_{int(time.time())}"
+
+        # Create manifest
+        manifest = RunManifest(
+            run_id=run_id,
+            resolved_config={},
+        )
 
         # ========================================
         # STEP 1: train_baseline_head
@@ -91,14 +97,16 @@ def test_real_e2e_pipeline():
             run_id=run_id,
             artifact_root=Path(tmpdir),
             artifact_store=artifact_store,
+            manifest=manifest,
             metadata={"test": True},
         )
 
         # Run training step
-        from pipeline.steps.train_baseline_head import TrainBaselineHeadSpec
+        from steps.train_baseline_head import TrainBaselineHeadSpec
 
         step_spec_class = TrainBaselineHeadSpec
-        result = step_spec_class.run(ctx)
+        step_spec = step_spec_class()
+        result = step_spec.run(ctx)
 
         if result is None:
             print(f"   ❌ FAILED: train_baseline_head returned None")
@@ -107,7 +115,7 @@ def test_real_e2e_pipeline():
         print(f"   ✅ TrainBaselineHeadSpec completed")
         print(f"      Artifacts: {result.artifacts_written}")
         print(f"      Metrics: {result.metrics}")
-        print(f"      Splits: {sorted([s.value for s in result.splits_used])}")
+        print(f"      Splits: {sorted(result.splits_used)}")
 
         # ========================================
         # STEP 2: export_calib_logits
@@ -124,6 +132,7 @@ def test_real_e2e_pipeline():
             run_id=run_id,
             artifact_root=Path(tmpdir),
             artifact_store=artifact_store,
+            manifest=manifest,
             metadata={"test": True},
         )
 
@@ -132,10 +141,11 @@ def test_real_e2e_pipeline():
         print("-" * 70)
 
         # Run export step
-        from pipeline.steps.export_calib_logits import ExportCalibLogitsSpec
+        from steps.export_calib_logits import ExportCalibLogitsSpec
 
         step_spec_class = ExportCalibLogitsSpec
-        result = step_spec_class.run(ctx_export)
+        step_spec = step_spec_class()
+        result = step_spec.run(ctx_export)
 
         if result is None:
             print(f"   ❌ FAILED: export_calib_logits returned None")
@@ -144,7 +154,7 @@ def test_real_e2e_pipeline():
         print(f"   ✅ ExportCalibLogitsSpec completed")
         print(f"      Artifacts: {result.artifacts_written}")
         print(f"      Metrics: {result.metrics}")
-        print(f"      Splits: {sorted([s.value for s in result.splits_used])}")
+        print(f"      Splits: {sorted(result.splits_used)}")
 
         # ========================================
         # STEP 3: sweep_thresholds
@@ -161,6 +171,7 @@ def test_real_e2e_pipeline():
             run_id=run_id,
             artifact_root=Path(tmpdir),
             artifact_store=artifact_store,
+            manifest=manifest,
             metadata={"test": True},
         )
 
@@ -169,10 +180,11 @@ def test_real_e2e_pipeline():
         print("-" * 70)
 
         # Run sweep step
-        from pipeline.steps.sweep_thresholds import SweepThresholdsSpec
+        from steps.sweep_thresholds import SweepThresholdsSpec
 
         step_spec_class = SweepThresholdsSpec
-        result = step_spec_class.run(ctx_sweep)
+        step_spec = step_spec_class()
+        result = step_spec.run(ctx_sweep)
 
         if result is None:
             print(f"   ❌ FAILED: sweep_thresholds returned None")
@@ -181,7 +193,7 @@ def test_real_e2e_pipeline():
         print(f"   ✅ SweepThresholdsSpec completed")
         print(f"      Artifacts: {result.artifacts_written}")
         print(f"      Metrics: {result.metrics}")
-        print(f"      Splits: {sorted([s.value for s in result.splits_used])}")
+        print(f"      Splits: {sorted(result.splits_used)}")
 
         # ========================================
         # FINAL VERIFICATION
@@ -222,7 +234,7 @@ def test_real_e2e_pipeline():
         with open(manifest_path, "r") as f:
             manifest = json.load(f)
 
-        print(f"   📋 Manifest loaded: {list(manifest.get('steps', {}).keys())}")
+        print(f"   📋 Manifest loaded: {sorted(manifest.get('steps', {}).keys())}")
 
         # Verify all 3 steps completed
         steps_expected = ["train_baseline_head", "export_calib_logits", "sweep_thresholds"]

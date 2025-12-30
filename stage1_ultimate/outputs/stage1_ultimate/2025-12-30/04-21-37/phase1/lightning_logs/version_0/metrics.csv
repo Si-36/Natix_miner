@@ -1,0 +1,3 @@
+epoch,step,train/acc,train/loss_epoch,val/acc,val/loss,val_calib/loss,val_select/acc,val_select/loss
+0,8,,,0.5,nan,nan,0.5,nan
+0,8,0.5104166865348816,nan,,,,,

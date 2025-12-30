@@ -14,7 +14,7 @@
 
 # Model architecture
 backbone_id: facebook/dinov3-vith16plus-pretrain-lvd1689m  # HuggingFace model ID (ViT-H/16 Plus)
-num_classes: 13  # NATIX roadwork (13 classes, NOT 7!)
+num_classes: 2  # NATIX roadwork (ACTUAL: 2 classes - class 0 and class 1)
 
 # Backbone settings
 freeze_backbone: true  # Freeze DINOv3, only train head

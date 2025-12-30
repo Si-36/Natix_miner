@@ -1,0 +1,7 @@
+{
+  "method": "selective_prediction",
+  "threshold": 0.5,
+  "coverage": 0.0,
+  "selective_accuracy": 0.0,
+  "selective_risk": 1.0
+}

@@ -1,0 +1,9 @@
+{
+  "model_checkpoint": "phase1/model_best.pth",
+  "policy_type": "threshold",
+  "policy_path": "phase2/thresholds.json",
+  "splits_json": "splits.json",
+  "num_classes": 13,
+  "backbone_id": "facebook/dinov3-vith16plus-pretrain-lvd1689m",
+  "created_at": "2025-12-30T02:19:59.059188"
+}

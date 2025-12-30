@@ -1,0 +1,4 @@
+- pipeline.phases=[phase1]
+- training.epochs=1
+- data.data_root=/home/sina/data/natix_subset_stratified
+- model.use_multiview=false

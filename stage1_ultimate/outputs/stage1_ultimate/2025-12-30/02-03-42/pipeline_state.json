@@ -1,0 +1,33 @@
+{
+  "executions": {
+    "phase1_baseline": {
+      "phase_type": "phase1_baseline",
+      "status": "completed",
+      "start_time": 1767047622.1548653,
+      "end_time": 1767048598.0934706,
+      "duration_seconds": 975.9386053085327,
+      "duration_minutes": 16.26564342180888,
+      "error_message": null
+    },
+    "phase2_threshold": {
+      "phase_type": "phase2_threshold",
+      "status": "completed",
+      "start_time": 1767048598.1082845,
+      "end_time": 1767048599.0548415,
+      "duration_seconds": 0.9465570449829102,
+      "duration_minutes": 0.01577595074971517,
+      "error_message": null
+    },
+    "phase6_bundle": {
+      "phase_type": "phase6_bundle",
+      "status": "completed",
+      "start_time": 1767048599.0551283,
+      "end_time": 1767048599.0651102,
+      "duration_seconds": 0.009981870651245117,
+      "duration_minutes": 0.00016636451085408528,
+      "error_message": null
+    }
+  },
+  "start_time": 1767047622.1547372,
+  "end_time": 1767048599.0651772
+}

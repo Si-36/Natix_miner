@@ -121,8 +121,7 @@ class Phase1LightningModule(pl.LightningModule):
         self.train_metrics = TrainingMetrics()
         self.val_metrics: TrainingMetrics()
 
-        # Device
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Mixed precision
         self.use_amp = config.precision == "bf16"  # Mixed precision
 
     def setup(
@@ -149,11 +148,14 @@ class Phase1LightningModule(pl.LightningModule):
         print(f"   📝 Creating DINOv3 backbone ({self.config.model_id})...")
         print("-" * 70)
 
+        # Convert precision string to torch dtype
+        dtype = torch.float16 if self.config.precision == "bf16" else torch.float32
+
         self.backbone = DINOv3Backbone(
             model_id=self.config.model_id,
-            hidden_dim=self.config.hidden_dim,
+            dtype=dtype,
             freeze_backbone=self.config.freeze_backbone,
-            precision=self.config.precision,
+            compile_model=self.config.compile_model,
         )
 
         # Move to device
@@ -162,14 +164,18 @@ class Phase1LightningModule(pl.LightningModule):
 
         # 2. Create head
         print(
-            f"   🧠 Creating Stage1Head (num_classes={self.config.num_classes}, hidden_dim={self.config.hidden_dim})..."
+            f"   🧠 Creating Stage1Head (num_classes={self.config.num_classes}, backbone_dim={self.backbone.embed_dim}, hidden_dim={self.config.hidden_dim})..."
         )
         print("-" * 70)
 
         self.head = Stage1Head(
+            backbone_dim=self.backbone.embed_dim,
             hidden_dim=self.config.hidden_dim,
             num_classes=self.config.num_classes,
             dropout=self.config.dropout,
+        )
+        print(
+            f"   🐛 DEBUG: Created head with input_proj shape: {self.head.input_proj.weight.shape}"
         )
 
         # Move to device
@@ -217,7 +223,6 @@ class Phase1LightningModule(pl.LightningModule):
                 self.optimizer,
                 T_max=self.config.max_epochs * len(train_loader) // self.config.batch_size,
                 eta_min=0.0,
-                eta_max=0.9,
             )
         else:
             self.scheduler = None

@@ -157,15 +157,28 @@ class ExportCalibLogitsSpec(StepSpec):
         print(f"\n   🔧 Reconstructing model from checkpoint...")
         print("-" * 70)
 
-        # Get model config from checkpoint or use defaults
+        # 🔥 CRITICAL: Require explicit config in checkpoint
+        # No defaults for architectural-critical fields - fail explicitly
         checkpoint_config = checkpoint.get("config", {})
-        model_id = checkpoint_config.get("model_id", "facebook/dinov3-vits16-pretrain-lvd1689m")
-        hidden_dim = checkpoint_config.get("hidden_dim", 384)
-        num_classes = checkpoint_config.get("num_classes", 2)
-        dropout = checkpoint_config.get("dropout", 0.1)
+
+        # Validate required config fields exist
+        if "hidden_dim" not in checkpoint_config:
+            raise RuntimeError(
+                "Checkpoint missing config.hidden_dim - cannot reconstruct model. "
+                "Training step must save config with explicit hidden_dim."
+            )
+        if "model_id" not in checkpoint_config:
+            raise RuntimeError("Checkpoint missing config.model_id - cannot reconstruct model.")
+        if "num_classes" not in checkpoint_config:
+            raise RuntimeError("Checkpoint missing config.num_classes - cannot reconstruct model.")
+
+        model_id = checkpoint_config["model_id"]
+        hidden_dim = checkpoint_config["hidden_dim"]
+        num_classes = checkpoint_config["num_classes"]
+        dropout = checkpoint_config.get("dropout", 0.1)  # Dropout has safe default
 
         print(f"   Model ID: {model_id}")
-        print(f"   Hidden dim: {hidden_dim}")
+        print(f"   Hidden dim: {hidden_dim} (from checkpoint config)")
         print(f"   Num classes: {num_classes}")
         print(f"   Dropout: {dropout}")
 
@@ -185,8 +198,12 @@ class ExportCalibLogitsSpec(StepSpec):
         head = Stage1Head(
             backbone_dim=hidden_dim,
             num_classes=num_classes,
+            hidden_dim=hidden_dim,
             dropout=dropout,
         )
+        # 🔥 CRITICAL: Move head to device BEFORE Sequential
+        head = head.to(device)
+        print(f"   ✅ Head created and moved to device: {device}")
 
         # Combine models
         model = nn.Sequential(backbone, head)

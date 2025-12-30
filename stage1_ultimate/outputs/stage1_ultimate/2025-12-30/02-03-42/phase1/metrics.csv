@@ -1,0 +1,10 @@
+epoch,step,train/acc,train/loss_epoch,train/loss_step,val/acc,val/loss,val_calib/loss,val_select/acc,val_select/loss
+0,9,,,nan,,,,,
+0,19,,,nan,,,,,
+0,29,,,nan,,,,,
+0,39,,,nan,,,,,
+0,49,,,nan,,,,,
+0,59,,,nan,,,,,
+0,69,,,nan,,,,,
+0,74,,,,1.0,nan,nan,1.0,nan
+0,74,1.0,nan,,,,,,

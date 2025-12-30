@@ -1,0 +1,25 @@
+backbone_name: facebook/dinov3-vith16plus-pretrain-lvd1689m
+num_classes: 13
+freeze_backbone: true
+head_type: linear
+dropout_rate: 0.3
+learning_rate: 0.0001
+weight_decay: 0.01
+use_ema: true
+ema_decay: 0.9999
+use_multiview: true
+multiview_aggregation: topk_mean
+multiview_topk: 2
+multiview_grid_size:
+- 3
+- 3
+multiview_overlap: 0.15
+data_root: /home/sina/data/natix_subset
+splits_json: /home/sina/projects/miner_b/stage1_ultimate/outputs/stage1_ultimate/2025-12-30/02-03-42/splits.json
+batch_size: 4
+num_workers: 8
+pin_memory: true
+persistent_workers: true
+eval_mode: center_crop_224
+eval_canvas_size: 896
+val_batch_size: null

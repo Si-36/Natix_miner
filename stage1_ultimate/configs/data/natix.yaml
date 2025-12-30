@@ -13,22 +13,11 @@ train_csv: ${data_root}/train.csv
 val_csv: ${data_root}/val.csv
 test_csv: ${data_root}/test.csv
 
-# Classes (FIXED: 13 classes for NATIX roadwork, NOT 7!)
-num_classes: 13
+# Classes (ACTUAL: 2 classes in HuggingFace NATIX dataset)
+num_classes: 2
 class_names:
-  - no_roadwork
-  - construction_site
-  - road_damage
-  - pothole
-  - crack
-  - roadwork_sign
-  - barrier
-  - cone
-  - equipment
-  - worker
-  - material
-  - marking
-  - other
+  - class_0  # no_roadwork (based on dataset inspection)
+  - class_1  # roadwork (based on dataset inspection)
 
 # Class weights (auto-computed if null)
 class_weights: null  # Will be computed from training data

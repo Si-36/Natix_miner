@@ -1,0 +1,6 @@
+- pipeline.phases=[phase1,phase2,phase6]
+- data.data_root=/home/sina/data/natix_subset
+- training.epochs=1
+- data.dataloader.batch_size=4
+- data.dataloader.val_batch_size=2
+- hardware.num_gpus=1
