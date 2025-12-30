@@ -1,8 +1,7 @@
 """
-Tests Package
+Test suite for StreetVision Stage-1 Ultimate Pipeline
 
-Latest 2025-2026 practices:
-- Python 3.14+ with pytest
-- Unit tests for individual components
-- Integration tests for full pipelines
+Test categories:
+- integration/: End-to-end pipeline tests
+- unit/: Component-level tests (future)
 """

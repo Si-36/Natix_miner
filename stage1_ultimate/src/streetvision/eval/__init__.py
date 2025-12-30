@@ -7,6 +7,9 @@ Single source of truth for:
 - Confusion matrix metrics (TP, TN, FP, FN)
 - False Negative Rate (FNR)
 - Threshold selection (max MCC)
+- Evaluation reports (Day 6)
+- Hard examples identification (Day 6)
+- Threshold sweep CSV export (Day 6)
 
 Why centralized:
 - Prevents metric drift across phases
@@ -31,6 +34,22 @@ from .thresholds import (
     sweep_thresholds_binary,
     plot_threshold_curve,
 )
+from .reports import (
+    compute_confusion_matrix_dict,
+    export_confusion_matrix,
+    compute_per_class_metrics,
+    identify_hard_examples,
+    export_hard_examples,
+    create_eval_report,
+    export_eval_report,
+)
+from .sweep import (
+    compute_threshold_sweep,
+    export_threshold_sweep_csv,
+    find_optimal_threshold,
+    compute_roc_curve_data,
+    compute_pr_curve_data,
+)
 
 __all__ = [
     # Core metrics
@@ -47,4 +66,18 @@ __all__ = [
     "select_threshold_max_mcc",
     "sweep_thresholds_binary",
     "plot_threshold_curve",
+    # Day 6: Evaluation reports
+    "compute_confusion_matrix_dict",
+    "export_confusion_matrix",
+    "compute_per_class_metrics",
+    "identify_hard_examples",
+    "export_hard_examples",
+    "create_eval_report",
+    "export_eval_report",
+    # Day 6: Threshold sweep
+    "compute_threshold_sweep",
+    "export_threshold_sweep_csv",
+    "find_optimal_threshold",
+    "compute_roc_curve_data",
+    "compute_pr_curve_data",
 ]

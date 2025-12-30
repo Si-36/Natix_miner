@@ -1,149 +1,179 @@
 """
-Pytest Configuration and Shared Fixtures
+Pytest fixtures for integration tests
 
-Latest 2025-2026 practices:
-- Python 3.14+ with modern fixtures
-- Clear fixture scope management
-- Reusable test utilities
+Provides:
+- Tiny config for fast tests (~5 min on CPU)
+- Temporary output directories
+- Helper functions for manifest loading
 """
 
-import pytest
-from pathlib import Path
-import tempfile
+import json
 import shutil
-from typing import Generator
+import tempfile
+from pathlib import Path
+from typing import Dict, Any
 
-from src.contracts.artifact_schema import ArtifactSchema, create_artifact_schema
-from src.contracts.split_contracts import Split
-
-
-@pytest.fixture(scope="session")
-def temp_output_dir() -> Generator[Path, None, None]:
-    """
-    Create a temporary output directory for tests
-
-    Scope: session (one directory for all tests)
-    Cleanup: Automatic after all tests complete
-    """
-    temp_dir = Path(tempfile.mkdtemp(prefix="streetvision_test_"))
-    yield temp_dir
-    # Cleanup
-    shutil.rmtree(temp_dir, ignore_errors=True)
+import pytest
+from omegaconf import DictConfig, OmegaConf
 
 
 @pytest.fixture
-def artifacts(temp_output_dir: Path) -> ArtifactSchema:
+def tiny_config() -> DictConfig:
     """
-    Create an ArtifactSchema instance for testing
+    Tiny configuration for integration tests
 
-    Scope: function (new instance for each test)
+    Features:
+    - 10 samples max (fast execution)
+    - 1 epoch only
+    - CPU-safe (no GPU required)
+    - All production features enabled
+
+    Time: ~5 minutes on CPU
     """
-    artifacts = create_artifact_schema(str(temp_output_dir))
-    artifacts.ensure_dirs()  # Create all directories
-    return artifacts
-
-
-@pytest.fixture
-def sample_splits_json(artifacts: ArtifactSchema) -> Path:
-    """
-    Create a sample splits.json file for testing
-
-    Returns:
-        Path to the created splits.json file
-    """
-    import json
-
-    splits_data = {
-        "train": ["image_001.jpg", "image_002.jpg", "image_003.jpg"],
-        "val_select": ["image_004.jpg", "image_005.jpg"],
-        "val_calib": ["image_006.jpg", "image_007.jpg"],
-        "val_test": ["image_008.jpg", "image_009.jpg"],
-        "metadata": {
-            "total_images": 9,
-            "split_strategy": "balanced",
-            "created_at": "2025-12-28T00:00:00Z",
+    config_dict = {
+        "data": {
+            "data_root": "${oc.env:HOME}/data/natix_subset",
+            "max_samples": 10,  # Tiny dataset
+            "dataloader": {
+                "batch_size": 2,
+                "val_batch_size": 2,
+                "num_workers": 0,  # Single-threaded for tests
+            },
         },
+        "training": {
+            "epochs": 1,  # Minimal training
+            "val_check_interval": 1.0,
+            "log_every_n_steps": 1,
+        },
+        "model": {
+            "backbone": "dinov2_vits14",  # Smallest backbone
+            "lr": 0.001,
+            "weight_decay": 0.0001,
+            "explora": {
+                "use_labeled_data": False,  # Unsupervised (no splits.json)
+                "lora_r": 8,
+                "lora_alpha": 16,
+                "lora_dropout": 0.1,
+            },
+        },
+        "hardware": {
+            "num_gpus": 0,  # CPU-only for tests
+            "precision": "32",
+        },
+        "pipeline": {
+            "phases": ["phase1"],  # Override per test
+            "save_state": True,
+        },
+        "output_dir": None,  # Set by temp_output_dir fixture
     }
 
-    splits_path = artifacts.splits_json
-    splits_path.write_text(json.dumps(splits_data, indent=2))
-    return splits_path
+    return OmegaConf.create(config_dict)
 
 
 @pytest.fixture
-def sample_checkpoint(artifacts: ArtifactSchema) -> Path:
+def temp_output_dir(tmp_path: Path) -> Path:
     """
-    Create a sample checkpoint file for testing
+    Temporary output directory for test runs
 
-    Returns:
-        Path to the created checkpoint file
+    Automatically cleaned up after test
     """
-    import torch
+    output_dir = tmp_path / "test_outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    yield output_dir
 
-    checkpoint = {
-        "epoch": 10,
-        "model_state_dict": {
-            "layer1.weight": torch.randn(10, 10),
-            "layer1.bias": torch.randn(10),
-        },
-        "optimizer_state_dict": {},
-        "loss": 0.123,
-        "accuracy": 0.892,
-    }
-
-    checkpoint_path = artifacts.phase1_checkpoint
-    torch.save(checkpoint, checkpoint_path)
-    return checkpoint_path
+    # Cleanup (pytest handles tmp_path cleanup automatically)
 
 
 @pytest.fixture
-def sample_logits(artifacts: ArtifactSchema) -> Path:
+def tiny_config_with_output(tiny_config: DictConfig, temp_output_dir: Path) -> DictConfig:
     """
-    Create sample logits.npy file for testing
-
-    Returns:
-        Path to the created logits file
+    Tiny config with temporary output directory set
     """
-    import numpy as np
-
-    # Shape: (num_samples, num_classes)
-    logits = np.random.randn(100, 13).astype(np.float32)
-
-    logits_path = artifacts.val_calib_logits
-    np.save(logits_path, logits)
-    return logits_path
+    cfg = OmegaConf.create(OmegaConf.to_container(tiny_config))
+    cfg.output_dir = str(temp_output_dir)
+    return cfg
 
 
-@pytest.fixture
-def sample_labels(artifacts: ArtifactSchema) -> Path:
+def load_manifest(manifest_path: Path) -> Dict[str, Any]:
     """
-    Create sample labels.npy file for testing
-
-    Returns:
-        Path to the created labels file
-    """
-    import numpy as np
-
-    # Shape: (num_samples,)
-    labels = np.random.randint(0, 13, size=100).astype(np.int64)
-
-    labels_path = artifacts.val_calib_labels
-    np.save(labels_path, labels)
-    return labels_path
-
-
-# Test utilities
-def create_dummy_file(path: Path, content: str = "dummy") -> Path:
-    """
-    Create a dummy file for testing
+    Load manifest JSON file
 
     Args:
-        path: Path to create
-        content: Content to write
+        manifest_path: Path to manifest.json
 
     Returns:
-        Path to the created file
+        Manifest dictionary
+
+    Raises:
+        FileNotFoundError: If manifest doesn't exist
+        json.JSONDecodeError: If manifest is malformed
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
-    return path
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Manifest not found: {manifest_path}")
+
+    with open(manifest_path, "r") as f:
+        return json.load(f)
+
+
+def compute_file_sha256(file_path: Path) -> str:
+    """
+    Compute SHA256 checksum of file
+
+    Args:
+        file_path: Path to file
+
+    Returns:
+        Hex-encoded SHA256 checksum
+    """
+    import hashlib
+
+    sha256 = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        while chunk := f.read(8192):
+            sha256.update(chunk)
+
+    return sha256.hexdigest()
+
+
+def verify_manifest(manifest: Dict[str, Any], base_dir: Path) -> None:
+    """
+    Verify all artifacts in manifest exist and checksums match
+
+    Args:
+        manifest: Manifest dictionary
+        base_dir: Base directory for resolving paths
+
+    Raises:
+        FileNotFoundError: If artifact missing
+        ValueError: If checksum mismatch
+    """
+    for artifact_name, artifact_info in manifest.get("output_artifacts", {}).items():
+        artifact_path = base_dir / artifact_info["path"]
+
+        # Check exists
+        if not artifact_path.exists():
+            raise FileNotFoundError(
+                f"Artifact missing: {artifact_name} at {artifact_path}"
+            )
+
+        # Check checksum
+        actual_sha256 = compute_file_sha256(artifact_path)
+        expected_sha256 = artifact_info["sha256"]
+
+        if actual_sha256 != expected_sha256:
+            raise ValueError(
+                f"Checksum mismatch for {artifact_name}:\n"
+                f"  Expected: {expected_sha256}\n"
+                f"  Actual:   {actual_sha256}"
+            )
+
+
+# Export helper functions for tests
+__all__ = [
+    "tiny_config",
+    "temp_output_dir",
+    "tiny_config_with_output",
+    "load_manifest",
+    "compute_file_sha256",
+    "verify_manifest",
+]

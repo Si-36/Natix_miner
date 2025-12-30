@@ -27,6 +27,7 @@ from pipeline.step_api import StepSpec, StepContext, StepResult
 
 from models.backbone import DINOv3Backbone
 from models.head import Stage1Head
+from models.vision_adapter import VisionBackboneAdapter
 
 from pipeline.registry import StepRegistry
 
@@ -254,10 +255,14 @@ class TrainExploraHeadSpec(StepSpec):
         print("   🏗️  Creating model (backbone + head)...")
         print("-" * 70)
 
-        # 5. Create combined model (same as baseline)
-        model = nn.Sequential(backbone, head)
+        # 5. Create combined model using VisionBackboneAdapter (2025 Best Practice)
+        # Adapter handles PEFT/HF vision calling conventions and drops text-only kwargs
+        print(f"   🎯 Using VisionBackboneAdapter (handles PEFT + HF vision args)")
+        print("-" * 70)
 
-        print(f"   ✅ Model assembled: backbone + head")
+        model = nn.Sequential(VisionBackboneAdapter(backbone), head)
+
+        print(f"   ✅ Model assembled: backbone → VisionBackboneAdapter → head")
 
         print()
         # 6. Move to device

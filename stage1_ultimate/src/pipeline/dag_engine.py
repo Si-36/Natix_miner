@@ -44,6 +44,17 @@ from pipeline.phase_spec import (
 from contracts.artifact_schema import ArtifactSchema
 from contracts.validators import ArtifactValidator
 
+# Import production-grade manifest system (Day 5)
+try:
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+    from streetvision.io.manifests import StepManifest
+    from tests.conftest import verify_manifest, load_manifest
+    HAS_MANIFEST_SYSTEM = True
+except ImportError:
+    HAS_MANIFEST_SYSTEM = False
+    logger.warning("Manifest system not available - resume logic disabled")
+
 
 class PhaseStatus(Enum):
     """Status of a phase in the pipeline"""
@@ -328,6 +339,64 @@ class DAGEngine:
                 )
         return True
 
+    def should_skip_phase(self, phase_type: PhaseType) -> bool:
+        """
+        Decide if phase should be skipped (already complete with valid manifest)
+
+        Rules (Day 5 resume logic):
+        1. If manifest.json doesn't exist → DON'T SKIP (run phase)
+        2. If manifest exists but artifacts missing → DON'T SKIP (re-run)
+        3. If manifest exists and checksums verify → SKIP (complete)
+
+        Args:
+            phase_type: Phase type to check
+
+        Returns:
+            True if should skip, False if should run
+
+        Note:
+            Requires manifest system (Day 5). If not available, always returns False.
+        """
+        if not HAS_MANIFEST_SYSTEM:
+            # No manifest system → cannot verify → don't skip
+            return False
+
+        # Get phase directory and manifest path
+        phase_dir_map = {
+            PhaseType.PHASE1_BASELINE: self.artifacts.phase1_dir,
+            PhaseType.PHASE2_THRESHOLD: self.artifacts.phase2_dir,
+            PhaseType.PHASE3_GATE: getattr(self.artifacts, 'phase3_dir', None),
+            PhaseType.PHASE4_EXPLORA: getattr(self.artifacts, 'phase4_dir', None),
+            PhaseType.PHASE5_SCRC: getattr(self.artifacts, 'phase5_dir', None),
+            PhaseType.PHASE6_BUNDLE: self.artifacts.bundle_export_dir,
+        }
+
+        phase_dir = phase_dir_map.get(phase_type)
+        if phase_dir is None:
+            logger.warning(f"No phase directory mapping for {phase_type.value}")
+            return False
+
+        manifest_path = phase_dir / "manifest.json"
+
+        # Rule 1: No manifest → run
+        if not manifest_path.exists():
+            logger.info(f"Manifest not found: {manifest_path} → Running phase")
+            return False
+
+        # Rule 2: Manifest exists → verify artifacts
+        try:
+            manifest = load_manifest(manifest_path)
+            verify_manifest(manifest, self.artifacts.output_dir)
+
+            # All artifacts exist and checksums match
+            logger.info(f"✅ Manifest valid: {manifest_path} → Skipping phase")
+            return True
+
+        except (FileNotFoundError, ValueError) as e:
+            # Artifacts missing or checksums mismatch
+            logger.warning(f"Manifest verification failed: {e} → Re-running phase")
+            return False
+
     def run_phase(self, phase_type: PhaseType) -> None:
         """
         Run a single phase
@@ -347,9 +416,15 @@ class DAGEngine:
         logger.info(f"Running: {phase.name}")
         logger.info(f"{'=' * 80}")
 
-        # Check if already completed
+        # Check if already completed (in-memory state)
         if self.state.is_completed(phase_type):
-            logger.info(f"  ✅ Already completed, skipping...")
+            logger.info(f"  ✅ Already completed (in-memory state), skipping...")
+            return
+
+        # Check if should skip based on manifest (Day 5 resume logic)
+        if self.should_skip_phase(phase_type):
+            logger.info(f"  ✅ Phase complete (manifest verified), skipping...")
+            self.state.mark_skipped(phase_type)
             return
 
         # Check dependencies
@@ -367,6 +442,27 @@ class DAGEngine:
 
             # Validate outputs
             self._validate_phase_outputs(phase)
+
+            # Verify manifest was written (Day 5 requirement)
+            if HAS_MANIFEST_SYSTEM:
+                phase_dir_map = {
+                    PhaseType.PHASE1_BASELINE: self.artifacts.phase1_dir,
+                    PhaseType.PHASE2_THRESHOLD: self.artifacts.phase2_dir,
+                    PhaseType.PHASE3_GATE: getattr(self.artifacts, 'phase3_dir', None),
+                    PhaseType.PHASE4_EXPLORA: getattr(self.artifacts, 'phase4_dir', None),
+                    PhaseType.PHASE5_SCRC: getattr(self.artifacts, 'phase5_dir', None),
+                    PhaseType.PHASE6_BUNDLE: self.artifacts.bundle_export_dir,
+                }
+                phase_dir = phase_dir_map.get(phase_type)
+                if phase_dir:
+                    manifest_path = phase_dir / "manifest.json"
+                    if not manifest_path.exists():
+                        raise RuntimeError(
+                            f"Phase {phase_type.value} completed but manifest not found!\n"
+                            f"Expected: {manifest_path}\n"
+                            f"This is a bug in the step implementation.\n"
+                            f"All steps must write manifest.json as the LAST operation."
+                        )
 
             # Mark as completed
             self.state.mark_completed(phase_type)

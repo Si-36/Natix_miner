@@ -33,6 +33,7 @@ import numpy as np
 
 from models.backbone import DINOv3Backbone
 from models.head import Stage1Head
+from models.vision_adapter import VisionBackboneAdapter
 from pipeline.artifacts import ArtifactKey, ArtifactStore
 from pipeline.contracts import Split, assert_allowed
 from pipeline.step_api import StepSpec, StepContext, StepResult
@@ -188,7 +189,10 @@ class Phase1LightningModule(pl.LightningModule):
                 bias="none",
                 target_modules=[f"layer.{i}.attention.q_proj" for i in range(12)]
                 + [f"layer.{i}.attention.v_proj" for i in range(12)],
-                task_type=TaskType.FEATURE_EXTRACTION,
+                # 2025 Best Practice: Don't use task_type for vision models
+                # TaskType.FEATURE_EXTRACTION creates PeftModelForFeatureExtraction
+                # which injects 'input_ids' causing TypeError with vision backbones
+                # Default PeftModel works correctly for both vision and text models
                 inference_mode=False,
             )
 
@@ -221,28 +225,17 @@ class Phase1LightningModule(pl.LightningModule):
         self.head = self.head.to(self.device)
         print(f"   ✅ Head created")
 
-        # 3. Combine backbone + head (with PEFT wrapper support)
-        if hasattr(self.backbone, "get_peft_model"):
-            # PEFT model - create custom forward
-            class PEFTModel(nn.Module):
-                def __init__(self, backbone, head):
-                    super().__init__()
-                    self.backbone = backbone
-                    self.head = head
+        # 3. Combine backbone + head using VisionBackboneAdapter (2025 Best Practice)
+        # Adapter handles PEFT/HF vision calling conventions and drops text-only kwargs
+        print(f"   🎯 Using VisionBackboneAdapter (handles PEFT + HF vision args)")
+        print("-" * 70)
 
-                def forward(self, pixel_values):
-                    # Call PEFT model with correct argument name
-                    features = self.backbone(pixel_values=pixel_values)
-                    return self.head(features)
-
-            self.model = PEFTModel(self.backbone, self.head)
-        else:
-            self.model = nn.Sequential(self.backbone, self.head)
+        self.model = nn.Sequential(VisionBackboneAdapter(self.backbone), self.head)
 
         print(
-            f"   🧱 Model architecture: {self.backbone.__class__.__name__} → {self.head.__class__.__name__}"
+            f"   🧱 Model architecture: {self.backbone.__class__.__name__} → VisionBackboneAdapter → {self.head.__class__.__name__}"
         )
-        print(f"   ✅ Model assembled")
+        print(f"   ✅ Model assembled (PEFT-safe)")
 
         # 4. Create criterion
         print(f"   📊 Creating criterion (CrossEntropyLoss)...")
@@ -304,16 +297,18 @@ class Phase1LightningModule(pl.LightningModule):
             )
             print(f"   ✅ Initial checkpoint saved")
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Forward pass.
 
         Args:
             x: Input images
+            **kwargs: Additional arguments (ignored, handled by VisionBackboneAdapter)
 
         Returns:
             Logits tensor
         """
+        # VisionBackboneAdapter handles all extra kwargs internally
         return self.model(x)
 
     def training_step(self, batch: Any, batch_idx: int) -> Dict[str, torch.Tensor]:
