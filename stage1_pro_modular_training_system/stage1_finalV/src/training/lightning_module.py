@@ -81,14 +81,27 @@ class Phase1LightningModuleConfig:
 class TrainingMetrics:
     """Training metrics tracking."""
 
-    loss: float = 0.0
-    accuracy: float = 0.0
-    precision: float = 0.0
-    recall: float = 0.0
-    f1: float = 0.0
-    confusion_matrix: Optional[Dict[str, Any]] = None
+    def __init__(self, prefix: str = ""):
+        self.loss = 0.0
+        self.accuracy = 0.0
+        self.precision = 0.0
+        self.recall = 0.0
+        self.f1 = 0.0
+        self.confusion_matrix: Optional[Dict[str, Any]] = None
+        self.prefix = prefix
 
     def to_dict(self) -> Dict[str, float]:
+        if self.prefix:
+            return {
+                f"{self.prefix}_{key}": value
+                for key, value in [
+                    ("loss", self.loss),
+                    ("accuracy", self.accuracy),
+                    ("precision", self.precision),
+                    ("recall", self.recall),
+                    ("f1", self.f1),
+                ]
+            }
         return {
             "loss": self.loss,
             "accuracy": self.accuracy,
@@ -135,9 +148,9 @@ class Phase1LightningModule(pl.LightningModule):
         self.optimizer: Optional[torch.optim.Optimizer] = None
         self.scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None
 
-        # Metrics tracking
-        self.train_metrics = TrainingMetrics()
-        self.val_metrics: TrainingMetrics()
+        # Metrics tracking (2025 Best Practice: initialize unconditionally)
+        self.train_metrics = TrainingMetrics(prefix="train")
+        self.val_metrics = TrainingMetrics(prefix="val")
 
         # Mixed precision
         self.use_amp = config.precision == "bf16"  # Mixed precision
