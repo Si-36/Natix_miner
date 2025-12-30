@@ -54,16 +54,15 @@ pip install -e .
 python3 -c "import torch; print(f'CUDA: {torch.cuda.is_available()}'); print(f'GPUs: {torch.cuda.device_count()}')"
 # Should show: CUDA: True, GPUs: 2
 
-# 4. Download dataset
-python3 scripts/download_full_dataset.py
-# OR upload with: scp -P PORT local_data.tar.gz root@HOST:/workspace/data/
+# 4. Download dataset (DOWNLOAD-ONLY)
+python3 scripts/download_full_dataset.py --output-dir /workspace/data/natix_subset
 
-# 5. Generate splits.json
-python3 scripts/generate_splits.py
+# 5. Generate canonical splits.json (60/15/15/10)
+python3 scripts/generate_splits.py --data-root /workspace/data/natix_subset
 
-# 6. Update config
-vim configs/config.yaml
-# Change:
+# 6. Update config (if needed)
+vim configs/data/natix.yaml
+# Ensure:
 #   data_root: /workspace/data/natix_subset
 #   splits_json: outputs/splits.json
 

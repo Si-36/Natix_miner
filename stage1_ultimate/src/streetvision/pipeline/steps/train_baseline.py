@@ -92,6 +92,7 @@ def run_phase1_baseline(
     num_classes = cfg.model.num_classes
     batch_size = cfg.data.dataloader.batch_size
     num_workers = cfg.data.dataloader.num_workers
+    max_samples = getattr(cfg.data, "max_samples", None)
     max_epochs = cfg.training.epochs
     learning_rate = cfg.training.optimizer.lr
     weight_decay = cfg.training.optimizer.weight_decay
@@ -117,6 +118,7 @@ def run_phase1_baseline(
         splits_json=str(artifacts.splits_json),
         batch_size=batch_size,
         num_workers=num_workers,
+        max_samples=max_samples,
     )
 
     # Create model (config-driven, NOT hardcoded)
@@ -171,10 +173,13 @@ def run_phase1_baseline(
     ]
 
     # Trainer (config-driven)
+    # Lightning expects devices>=1. For CPU runs we use devices=1.
+    accelerator = "cpu" if num_gpus == 0 else "gpu"
+    devices = 1 if num_gpus == 0 else num_gpus
     trainer = L.Trainer(
         max_epochs=max_epochs,
-        accelerator="auto",
-        devices=num_gpus,
+        accelerator=accelerator,
+        devices=devices,
         precision=precision,
         callbacks=callbacks,
         default_root_dir=str(artifacts.phase1_dir),

@@ -1,0 +1,15 @@
+{
+  "executions": {
+    "phase1_baseline": {
+      "phase_type": "phase1_baseline",
+      "status": "failed",
+      "start_time": 1767125210.007742,
+      "end_time": 1767125222.1873612,
+      "duration_seconds": 12.179619312286377,
+      "duration_minutes": 0.20299365520477294,
+      "error_message": "Input image size (224*224) doesn't match model (30*30)."
+    }
+  },
+  "start_time": 1767125210.0076685,
+  "end_time": null
+}

@@ -346,8 +346,27 @@ class Phase1LightningModule(pl.LightningModule):
         images, labels = batch
         batch_size = images.shape[0]
 
+        # 2025 Best Practice: Enforce data contract before loss computation
+        # CrossEntropyLoss expects labels [N] (class indices), not [N,1] or [N,C]
+        if labels.ndim == 2:
+            if labels.shape[1] == 1:
+                labels = labels.squeeze(1)
+            elif labels.shape[1] > 1:
+                labels = labels.argmax(dim=1)
+
+        labels = labels.long()
+
         # Forward pass
         logits = self.forward(images)
+
+        # 2025 Best Practice: Enforce logits shape
+        # CrossEntropyLoss expects logits [N,C] for binary/multiclass
+        if logits.ndim != 2:
+            raise ValueError(f"Logits must be 2D [B,C], got shape {logits.shape}")
+        if logits.shape[0] != labels.shape[0]:
+            raise ValueError(
+                f"Batch size mismatch: logits={logits.shape[0]}, labels={labels.shape[0]}"
+            )
 
         # Compute loss
         loss = self.criterion(logits, labels)

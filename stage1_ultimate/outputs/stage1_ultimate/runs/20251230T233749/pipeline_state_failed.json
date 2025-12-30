@@ -1,0 +1,15 @@
+{
+  "executions": {
+    "phase1_baseline": {
+      "phase_type": "phase1_baseline",
+      "status": "failed",
+      "start_time": 1767125269.964221,
+      "end_time": 1767125271.2353702,
+      "duration_seconds": 1.2711491584777832,
+      "duration_minutes": 0.021185819307963052,
+      "error_message": "Failed to load DINOv3 from HuggingFace: hf-internal-testing/tiny-random-vit-base-patch16-224\nError: hf-internal-testing/tiny-random-vit-base-patch16-224 is not a local folder and is not a valid model identifier listed on 'https://huggingface.co/models'\nIf this is a private repository, make sure to pass a token having permission to this repo either by logging in with `hf auth login` or by passing `token=<your_token>`\n\nValid DINOv3 model IDs:\n  - facebook/dinov3-vitl16-pretrain-lvd1689m (ViT-L/16)\n  - facebook/dinov3-vith16-pretrain-lvd1689m (ViT-H/16)\n\nOr provide a local path to DINOv3 checkpoint."
+    }
+  },
+  "start_time": 1767125269.964125,
+  "end_time": null
+}

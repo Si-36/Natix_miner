@@ -7,7 +7,7 @@ name = "streetvision-stage1"
 version = "1.0.0"
 description = "StreetVision Training Pipeline - Stage 1 Ultimate (Python 3.14+ BLEEDING EDGE)"
 readme = "README.md"
-requires-python = ">=3.14"  # Python 3.14+ - BLEEDING EDGE with improved async, better performance!
+requires-python = ">=3.11,<3.14"  # Python 3.11-3.13 (Hydra/argparse breaks on some 3.14 builds)
 license = {text = "MIT"}
 authors = [
     {name = "StreetVision Team"},
@@ -29,6 +29,7 @@ dependencies = [
     "timm>=1.0.0",
     "transformers>=4.40.0",
     "peft>=0.13.0",  # Latest PEFT for ExPLoRA
+    "datasets>=2.20.0",  # HuggingFace datasets (needed by scripts/download_full_dataset.py)
 
     # LATEST Scientific computing
     "scikit-learn>=1.5.0",
@@ -84,7 +85,7 @@ Documentation = "https://streetvision.readthedocs.io"
 # Ruff configuration (replaces flake8, isort, pydocstyle)
 [tool.ruff]
 line-length = 100
-target-version = "py314"  # Python 3.14 - BLEEDING EDGE!
+target-version = "py311"  # Python 3.11+
 
 [tool.ruff.lint]
 select = [
@@ -108,7 +109,7 @@ ignore = [
 # Black configuration
 [tool.black]
 line-length = 100
-target-version = ["py314"]  # Python 3.14 - BLEEDING EDGE!
+target-version = ["py311"]  # Python 3.11+
 include = '\.pyi?$'
 
 # isort configuration
@@ -119,7 +120,7 @@ known_first_party = ["src", "streetvision"]
 
 # MyPy configuration
 [tool.mypy]
-python_version = "3.14"  # Python 3.14 - BLEEDING EDGE!
+python_version = "3.11"  # Python 3.11+
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false  # Start lenient, tighten later

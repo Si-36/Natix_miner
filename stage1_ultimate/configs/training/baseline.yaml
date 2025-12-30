@@ -14,13 +14,13 @@
 
 # Training hyperparameters
 epochs: 100
-batch_size: 32
+batch_size: 64  # IMPROVED: 2×A6000 can handle larger batches (was 32)
 gradient_accumulation_steps: 1
 
 # Optimizer
 optimizer:
   name: adamw
-  lr: 1e-4
+  lr: 3e-4  # IMPROVED: Head-only training can handle higher LR (was 1e-4)
   betas: [0.9, 0.999]
   eps: 1e-8
   weight_decay: 0.01  # Safe weight decay
@@ -69,11 +69,11 @@ gradient_clipping:
 #   Rental GPU H100: BFloat16 (FP32-like range, fast, no overflow)
 #   AVOID FP16:      DINOv3 features overflow in FP16 → NaN logits!
 #
-# To enable BFloat16 on rental GPU (H100/A100):
-#   training.mixed_precision.enabled=true training.mixed_precision.dtype=bfloat16
+# To enable BFloat16 on rental GPU (H100/A100/A6000):
+#   Override with: training.mixed_precision.enabled=true
 mixed_precision:
   enabled: false  # SAFE DEFAULT: FP32 for local dev (prevents NaN)
-  dtype: bfloat16  # Use BFloat16 on rental GPU (NOT float16!)
+  dtype: bfloat16  # IMPROVED: BFloat16 on rental GPU = 1.5-2× faster (NOT float16!)
 
 # Distributed training (FSDP2)
 distributed:

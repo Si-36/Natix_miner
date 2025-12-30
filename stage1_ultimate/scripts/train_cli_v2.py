@@ -26,6 +26,7 @@ import logging
 import sys
 from pathlib import Path
 from typing import List
+import shutil
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
@@ -178,6 +179,32 @@ def main(cfg: DictConfig) -> None:
     # Create directories
     artifacts.ensure_dirs()
     logger.info("✅ Created output directories")
+
+    # ---------------------------------------------------------------------
+    # Canonical input wiring: ensure splits.json is available in the run dir
+    # The DAG engine validates inputs using ArtifactSchema paths (run-scoped).
+    # We allow users to generate splits externally (e.g. outputs/splits.json)
+    # and copy it into this run directory automatically.
+    # ---------------------------------------------------------------------
+    try:
+        cfg_splits = Path(getattr(cfg.data, "splits_json", artifacts.splits_json))
+    except Exception:
+        cfg_splits = artifacts.splits_json
+
+    # Interpret relative paths relative to repo CWD (Hydra chdir is disabled)
+    if not cfg_splits.is_absolute():
+        cfg_splits = Path.cwd() / cfg_splits
+
+    if cfg_splits.exists() and cfg_splits.resolve() != artifacts.splits_json.resolve():
+        shutil.copy2(cfg_splits, artifacts.splits_json)
+        logger.info(f"✅ Copied splits.json into run dir: {cfg_splits} -> {artifacts.splits_json}")
+    elif not artifacts.splits_json.exists():
+        logger.warning(
+            f"⚠️  splits.json not found. Expected either:\n"
+            f"  - cfg.data.splits_json={cfg_splits}\n"
+            f"  - artifacts.splits_json={artifacts.splits_json}\n"
+            f"Run: python3 scripts/generate_splits.py"
+        )
 
     # Create DAG engine
     engine = DAGEngine(artifacts=artifacts)

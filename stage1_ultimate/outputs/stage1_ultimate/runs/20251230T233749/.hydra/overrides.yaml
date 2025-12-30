@@ -1,0 +1,11 @@
+- pipeline.phases=[phase1]
+- data.max_samples=100
+- training.epochs=1
+- hardware.num_gpus=0
+- data.data_root=outputs/smoke_data/natix_subset
+- data.splits_json=outputs/splits.json
+- model.backbone_id=hf-internal-testing/tiny-random-vit-base-patch16-224
+- model.use_multiview=false
+- data.dataloader.num_workers=0
+- data.dataloader.batch_size=8
+- data.dataloader.val_batch_size=8

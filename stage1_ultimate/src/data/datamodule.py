@@ -66,6 +66,7 @@ class NATIXDataModule(L.LightningDataModule):
         num_workers: int = 4,
         pin_memory: bool = True,
         persistent_workers: bool = True,
+        max_samples: Optional[int] = None,  # Debug: cap samples per split
         # High-res eval settings (2025-12-29)
         eval_mode: str = "center_crop_224",  # or "letterbox_canvas"
         eval_canvas_size: int = 896,
@@ -83,6 +84,7 @@ class NATIXDataModule(L.LightningDataModule):
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         self.persistent_workers = persistent_workers and num_workers > 0
+        self.max_samples = max_samples
 
         # Eval settings
         self.eval_mode = eval_mode
@@ -107,6 +109,17 @@ class NATIXDataModule(L.LightningDataModule):
             f"val_batch_size={self.val_batch_size}, num_workers={num_workers}, "
             f"eval_mode={eval_mode}, eval_canvas_size={eval_canvas_size}"
         )
+        if self.max_samples is not None:
+            logger.info(f"Max samples per split: {self.max_samples}")
+
+    def _maybe_truncate(self, dataset: NATIXDataset, name: str) -> None:
+        """Optionally truncate dataset.samples for smoke tests / quick debugging."""
+        if self.max_samples is None:
+            return
+        if len(dataset) <= self.max_samples:
+            return
+        dataset.samples = dataset.samples[: self.max_samples]
+        logger.warning(f"Truncated {name} to {len(dataset)} samples (max_samples={self.max_samples})")
 
     def prepare_data(self) -> None:
         """
@@ -146,6 +159,7 @@ class NATIXDataModule(L.LightningDataModule):
                 split=Split.TRAIN,
                 transform=self.train_transform,  # 224 crops with augmentation
             )
+            self._maybe_truncate(self.train_dataset, "train")
 
             self.val_select_dataset = NATIXDataset(
                 data_root=self.data_root,
@@ -153,6 +167,7 @@ class NATIXDataModule(L.LightningDataModule):
                 split=Split.VAL_SELECT,
                 transform=self.eval_transform,  # High-res letterbox (if enabled)
             )
+            self._maybe_truncate(self.val_select_dataset, "val_select")
 
             self.val_calib_dataset = NATIXDataset(
                 data_root=self.data_root,
@@ -160,6 +175,7 @@ class NATIXDataModule(L.LightningDataModule):
                 split=Split.VAL_CALIB,
                 transform=self.eval_transform,  # High-res letterbox (if enabled)
             )
+            self._maybe_truncate(self.val_calib_dataset, "val_calib")
 
             logger.info(f"Train: {len(self.train_dataset)} samples")
             logger.info(f"Val Select: {len(self.val_select_dataset)} samples")
@@ -175,6 +191,7 @@ class NATIXDataModule(L.LightningDataModule):
                 split=Split.VAL_SELECT,
                 transform=self.eval_transform,
             )
+            self._maybe_truncate(self.val_select_dataset, "val_select")
 
             logger.info(f"Val Select: {len(self.val_select_dataset)} samples")
 
@@ -188,6 +205,7 @@ class NATIXDataModule(L.LightningDataModule):
                 split=Split.VAL_TEST,
                 transform=self.eval_transform,
             )
+            self._maybe_truncate(self.val_test_dataset, "val_test")
 
             logger.info(f"Val Test: {len(self.val_test_dataset)} samples")
 
@@ -201,6 +219,7 @@ class NATIXDataModule(L.LightningDataModule):
                 split=Split.VAL_TEST,
                 transform=self.eval_transform,
             )
+            self._maybe_truncate(self.val_test_dataset, "val_test")
 
             logger.info(f"Prediction: {len(self.val_test_dataset)} samples")
 

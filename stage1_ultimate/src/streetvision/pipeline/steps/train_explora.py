@@ -242,12 +242,16 @@ def run_phase4_explora(
         logger.info("Using single GPU (no DDP)")
 
     # Trainer (production-grade config)
+    # Lightning expects devices>=1. For CPU runs we use devices=1.
+    accelerator = "cpu" if num_gpus == 0 else "gpu"
+    devices = 1 if num_gpus == 0 else num_gpus
+    precision = "32" if accelerator == "cpu" else "bf16-mixed"  # BF16 only on GPU
     trainer = L.Trainer(
         max_epochs=max_epochs,
-        accelerator="auto",
-        devices=num_gpus,
+        accelerator=accelerator,
+        devices=devices,
         strategy=strategy,
-        precision="bf16-mixed",  # bfloat16 for speed + stability
+        precision=precision,
         callbacks=callbacks,
         default_root_dir=str(artifacts.phase4_dir),
         log_every_n_steps=10,

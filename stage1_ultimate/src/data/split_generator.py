@@ -237,7 +237,7 @@ class SplitGenerator:
             class_name: Name of the class directory
 
         Returns:
-            Integer label (0-12 for 13 classes)
+            Integer label (0-1 for binary roadwork, when using class dirs 0/1)
 
         Raises:
             ValueError: If class name is unknown

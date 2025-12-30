@@ -1,0 +1,316 @@
+model:
+  backbone_id: hf-internal-testing/tiny-random-ViTModel
+  num_classes: 2
+  freeze_backbone: true
+  use_flash_attention: false
+  pooling_mode: cls_token
+  head_type: linear
+  dropout_rate: 0.3
+  hidden_size: 1280
+  init_from_explora: false
+  explora_checkpoint_path: null
+  use_ema: true
+  ema_decay: 0.9999
+  use_multiview: false
+  multiview_aggregation: topk_mean
+  multiview_topk: 2
+  multiview_grid_size:
+  - 3
+  - 3
+  multiview_overlap: 0.15
+  image_size: 224
+  patch_size: 16
+  preprocessing:
+    mean:
+    - 0.485
+    - 0.456
+    - 0.406
+    std:
+    - 0.229
+    - 0.224
+    - 0.225
+training:
+  epochs: 1
+  batch_size: 64
+  gradient_accumulation_steps: 1
+  optimizer:
+    name: adamw
+    lr: 0.0003
+    betas:
+    - 0.9
+    - 0.999
+    eps: 1.0e-08
+    weight_decay: 0.01
+  scheduler:
+    name: cosine
+    warmup_epochs: 5
+    min_lr: 1.0e-06
+    warmup_start_lr: 1.0e-06
+  loss:
+    name: cross_entropy
+    label_smoothing: 0.1
+    class_weights: null
+  regularization:
+    dropout: 0.3
+    mixup_alpha: 0.2
+    cutmix_alpha: 1.0
+    stochastic_depth: 0.1
+  early_stopping:
+    enabled: true
+    patience: 10
+    monitor: val_select/acc
+    mode: max
+    min_delta: 0.001
+  ema:
+    enabled: true
+    decay: 0.9999
+  gradient_clipping:
+    enabled: true
+    max_norm: 1.0
+  mixed_precision:
+    enabled: false
+    dtype: bfloat16
+  distributed:
+    enabled: false
+    backend: nccl
+    strategy: fsdp2
+    sharding_strategy: full_shard
+  logging:
+    log_every_n_steps: 10
+    val_every_n_epochs: 1
+    save_every_n_epochs: 5
+  multiview:
+    enabled: true
+    global_crop: true
+    local_crops: 9
+    top_k_aggregation: 2
+    batch_inference: true
+  save_logits:
+    enabled: true
+    splits:
+    - val_calib
+    save_features: true
+data:
+  data_root: outputs/smoke_data/natix_subset
+  splits_json: outputs/splits.json
+  max_samples: 100
+  verify_hash: false
+  expected_hash: null
+  num_classes: 2
+  class_names:
+  - class_0
+  - class_1
+  class_weights: null
+  splits:
+    train_ratio: 0.6
+    val_select_ratio: 0.15
+    val_calib_ratio: 0.15
+    val_test_ratio: 0.1
+  preprocessing:
+    resize: 224
+    crop_size: 224
+    mean:
+    - 0.485
+    - 0.456
+    - 0.406
+    std:
+    - 0.229
+    - 0.224
+    - 0.225
+    interpolation: bilinear
+    eval_mode: letterbox_canvas
+    eval_canvas_size: 896
+    eval_letterbox: true
+    eval_multiscale: false
+    eval_canvas_sizes:
+    - 896
+    - 1024
+  dataloader:
+    batch_size: 8
+    val_batch_size: 8
+    num_workers: 0
+    pin_memory: true
+    persistent_workers: true
+    prefetch_factor: 2
+  augmentation:
+    train:
+      horizontal_flip: 0.5
+      vertical_flip: 0.0
+      rotation: 15
+      color_jitter:
+        brightness: 0.4
+        contrast: 0.4
+        saturation: 0.4
+        hue: 0.1
+      auto_augment: true
+      random_erasing: 0.1
+    val:
+      center_crop: false
+  multiview:
+    enabled: true
+    grid_size:
+    - 3
+    - 3
+    overlap: 0.15
+    content_aware_tiling: true
+  slicing:
+    enabled: true
+    slices:
+    - name: day
+      filter: time_of_day == "day"
+    - name: night
+      filter: time_of_day == "night"
+    - name: clear
+      filter: weather == "clear"
+    - name: rain
+      filter: weather == "rain"
+    - name: snow
+      filter: weather == "snow"
+  quality:
+    min_image_size: 224
+    max_aspect_ratio: 3.0
+    check_corrupted: true
+calibration:
+  name: temperature
+  method: temperature_scaling
+  optimizer:
+    name: lbfgs
+    max_iter: 100
+    lr: 0.01
+  validation:
+    metric: ece
+    num_bins: 15
+  init_temperature: 1.0
+  temperature_bounds:
+    min: 0.1
+    max: 10.0
+  early_stopping:
+    enabled: true
+    patience: 10
+    min_delta: 0.0001
+  output:
+    save_params: true
+    save_calibrated_logits: true
+    plot_reliability_diagram: true
+evaluation:
+  splits:
+  - val_test
+  classification:
+    accuracy: true
+    precision: true
+    recall: true
+    f1: true
+    confusion_matrix: true
+    per_class_metrics: true
+  calibration:
+    ece: true
+    mce: true
+    ace: true
+    brier: true
+    nll: true
+    ece_bins: 15
+    ece_scheme: equal_width
+  ranking:
+    auroc: true
+    auprc: true
+    augrc: true
+  bootstrap:
+    enabled: true
+    num_resamples: 1000
+    confidence_level: 0.95
+    metrics:
+    - accuracy
+    - ece
+    - auroc
+  slicing:
+    enabled: true
+    slices:
+    - name: day
+      filter: time_of_day == "day"
+    - name: night
+      filter: time_of_day == "night"
+    - name: clear_weather
+      filter: weather == "clear"
+    - name: adverse_weather
+      filter: weather in ["rain", "snow", "fog"]
+  visualization:
+    reliability_diagram: true
+    calibration_plot: true
+    roc_curve: true
+    pr_curve: true
+    confusion_matrix: true
+    plot_style: seaborn
+    figure_size:
+    - 10
+    - 8
+    dpi: 300
+    save_format: png
+  output:
+    save_metrics_json: true
+    save_metrics_csv: true
+    save_predictions: true
+    save_visualizations: true
+experiment_name: stage1_ultimate
+output_dir: ${hydra:runtime.output_dir}
+pipeline:
+  phases:
+  - phase1
+  save_state: true
+  state_path: ${output_dir}/pipeline_state.json
+  validate_inputs: true
+  validate_outputs: true
+  fail_fast: true
+seed: 42
+logging:
+  level: INFO
+  use_tensorboard: true
+  use_wandb: false
+  wandb:
+    project: streetvision
+    entity: null
+    name: ${experiment_name}
+hardware:
+  device: cuda
+  num_gpus: 0
+  num_workers: 8
+  pin_memory: true
+  mixed_precision: true
+splits:
+  train_ratio: 0.6
+  val_select_ratio: 0.15
+  val_calib_ratio: 0.15
+  val_test_ratio: 0.1
+multiview:
+  enabled: true
+  global_crop: true
+  local_crops: 9
+  top_k_aggregation: 2
+  batch_inference: true
+augmentation:
+  train:
+    resize: 224
+    crop_size: 224
+    horizontal_flip: 0.5
+    color_jitter: 0.4
+    auto_augment: true
+    mixup_alpha: 0.2
+    cutmix_alpha: 1.0
+  val:
+    resize: 224
+    crop_size: 224
+    center_crop: true
+regularization:
+  dropout: 0.3
+  weight_decay: 0.01
+  label_smoothing: 0.1
+  stochastic_depth: 0.1
+early_stopping:
+  enabled: true
+  patience: 10
+  monitor: val_select/acc
+  mode: max
+checkpointing:
+  save_last: true
+  save_best: true
+  save_ema: true
+  ema_decay: 0.9999

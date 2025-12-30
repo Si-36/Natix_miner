@@ -282,7 +282,7 @@ class NATIXDataset(Dataset):
             image_filename: Filename (possibly with path)
 
         Returns:
-            Integer label (0-12 for 13 classes)
+            Integer label (0-1 for binary roadwork)
 
         Raises:
             ValueError: If label cannot be inferred
@@ -344,12 +344,12 @@ class NATIXDataset(Dataset):
             Train mode OR eval without letterbox:
                 (image_tensor, label)
                 - image_tensor: torch.Tensor [3, H, W]
-                - label: int (0-12 for 13 classes)
+                - label: int (0-1 for binary roadwork)
 
             Eval with letterbox mode:
                 (image_tensor, label, content_box)
                 - image_tensor: torch.Tensor [3, canvas, canvas]
-                - label: int (0-12 for 13 classes)
+                - label: int (0-1 for binary roadwork)
                 - content_box: torch.Tensor [4] in (x1, y1, x2, y2) format
         """
         metadata = self.samples[idx]

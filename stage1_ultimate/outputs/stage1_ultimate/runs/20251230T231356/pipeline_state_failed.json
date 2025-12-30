@@ -1,0 +1,15 @@
+{
+  "executions": {
+    "phase1_baseline": {
+      "phase_type": "phase1_baseline",
+      "status": "failed",
+      "start_time": 1767123836.3439324,
+      "end_time": 1767123839.4665258,
+      "duration_seconds": 3.122593402862549,
+      "duration_minutes": 0.05204322338104248,
+      "error_message": "`Trainer(devices=0)` value is not a valid input using cuda accelerator."
+    }
+  },
+  "start_time": 1767123836.3437662,
+  "end_time": null
+}

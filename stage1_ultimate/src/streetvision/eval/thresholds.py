@@ -30,7 +30,7 @@ except ImportError:
 def select_threshold_max_mcc(
     logits: torch.Tensor,
     labels: torch.Tensor,
-    n_thresholds: int = 100,
+    n_thresholds: int = 2000,  # IMPROVED: Higher resolution finds true optimum (was 100)
 ) -> Tuple[float, float]:
     """
     Select threshold that maximizes MCC

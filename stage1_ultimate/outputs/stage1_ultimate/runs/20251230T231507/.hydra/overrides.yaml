@@ -1,0 +1,6 @@
+- pipeline.phases=[phase1]
+- data.max_samples=100
+- training.epochs=1
+- hardware.num_gpus=0
+- data.data_root=outputs/smoke_data/natix_subset
+- data.splits_json=outputs/splits.json

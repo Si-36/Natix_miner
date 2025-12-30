@@ -18,25 +18,17 @@ from typing import ClassVar
 
 class RoadworkClass(Enum):
     """
-    NATIX Roadwork Classes
+    NATIX Roadwork (binary) classes (HuggingFace: natix-network-org/roadwork)
 
-    CRITICAL: This is the canonical definition.
-    Do NOT duplicate this anywhere else.
+    NOTE: This repo is currently standardized on binary classification:
+    - 0: no roadwork
+    - 1: roadwork
+
+    CRITICAL: This is the canonical definition for Stage-1 binary pipeline.
     """
 
-    NO_DAMAGE = 0
-    LONGITUDINAL_CRACK = 1
-    TRANSVERSE_CRACK = 2
-    ALLIGATOR_CRACK = 3
-    POTHOLE = 4
-    REPAIR = 5
-    CROSSWALK = 6
-    MANHOLE = 7
-    JOINT = 8
-    MARKING = 9
-    BUMP = 10
-    DEPRESSION = 11
-    OTHER = 12
+    NO_ROADWORK = 0
+    ROADWORK = 1
 
     @classmethod
     def from_name(cls, name: str) -> "RoadworkClass":
@@ -57,19 +49,12 @@ class RoadworkClass(Enum):
 
         # Try direct mapping
         name_to_class = {
-            "no_damage": cls.NO_DAMAGE,
-            "longitudinal_crack": cls.LONGITUDINAL_CRACK,
-            "transverse_crack": cls.TRANSVERSE_CRACK,
-            "alligator_crack": cls.ALLIGATOR_CRACK,
-            "pothole": cls.POTHOLE,
-            "repair": cls.REPAIR,
-            "crosswalk": cls.CROSSWALK,
-            "manhole": cls.MANHOLE,
-            "joint": cls.JOINT,
-            "marking": cls.MARKING,
-            "bump": cls.BUMP,
-            "depression": cls.DEPRESSION,
-            "other": cls.OTHER,
+            "no_roadwork": cls.NO_ROADWORK,
+            "class_0": cls.NO_ROADWORK,
+            "0": cls.NO_ROADWORK,
+            "roadwork": cls.ROADWORK,
+            "class_1": cls.ROADWORK,
+            "1": cls.ROADWORK,
         }
 
         if name_normalized in name_to_class:
@@ -86,22 +71,11 @@ class RoadworkClass(Enum):
     def get_display_name(cls, class_id: int) -> str:
         """Get human-readable display name"""
         display_names = {
-            0: "No Damage",
-            1: "Longitudinal Crack",
-            2: "Transverse Crack",
-            3: "Alligator Crack",
-            4: "Pothole",
-            5: "Repair",
-            6: "Crosswalk",
-            7: "Manhole",
-            8: "Joint",
-            9: "Marking",
-            10: "Bump",
-            11: "Depression",
-            12: "Other",
+            0: "No Roadwork",
+            1: "Roadwork",
         }
         if class_id not in display_names:
-            raise ValueError(f"Invalid class ID: {class_id} (must be 0-12)")
+            raise ValueError(f"Invalid class ID: {class_id} (must be 0-1)")
         return display_names[class_id]
 
 
@@ -115,21 +89,10 @@ class LabelSchema:
     CRITICAL: All modules must use this instead of hardcoding values.
     """
 
-    NUM_CLASSES: ClassVar[int] = 13
+    NUM_CLASSES: ClassVar[int] = 2
     CLASS_NAMES: ClassVar[list[str]] = [
-        "no_damage",
-        "longitudinal_crack",
-        "transverse_crack",
-        "alligator_crack",
-        "pothole",
-        "repair",
-        "crosswalk",
-        "manhole",
-        "joint",
-        "marking",
-        "bump",
-        "depression",
-        "other",
+        "class_0",  # no_roadwork
+        "class_1",  # roadwork
     ]
 
     @classmethod
@@ -138,7 +101,7 @@ class LabelSchema:
         Validate that label is in valid range
 
         Args:
-            label: Integer label (0-12)
+            label: Integer label (0-1)
 
         Returns:
             True if valid
@@ -162,7 +125,7 @@ class LabelSchema:
             class_name: Class name (e.g., "pothole")
 
         Returns:
-            Integer class ID (0-12)
+            Integer class ID (0-1)
 
         Raises:
             ValueError: If class name is unknown
@@ -175,7 +138,7 @@ class LabelSchema:
         Get class name from ID
 
         Args:
-            class_id: Integer class ID (0-12)
+            class_id: Integer class ID (0-1)
 
         Returns:
             Class name string
@@ -192,7 +155,7 @@ class LabelSchema:
         Get human-readable display name
 
         Args:
-            class_id: Integer class ID (0-12)
+            class_id: Integer class ID (0-1)
 
         Returns:
             Display name (e.g., "Pothole")

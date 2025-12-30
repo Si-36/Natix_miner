@@ -1,0 +1,810 @@
+{
+  "train": [
+    {
+      "filename": "images/smoke_0019.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0000.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0145.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0179.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0015.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0137.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0027.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0090.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0154.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0192.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0128.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0116.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0040.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0166.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0073.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0088.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0039.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0072.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0115.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0096.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0157.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0119.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0121.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0183.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0081.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0062.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0007.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0028.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0055.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0033.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0124.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0045.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0181.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0038.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0152.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0165.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0077.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0009.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0064.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0193.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0069.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0173.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0153.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0198.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0129.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0182.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0080.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0139.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0024.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0160.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0110.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0123.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0158.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0148.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0120.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0188.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0093.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0049.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0010.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0185.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0174.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0105.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0066.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0044.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0030.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0025.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0130.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0168.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0089.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0135.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0022.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0034.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0011.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0026.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0013.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0006.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0112.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0131.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0035.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0016.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0085.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0003.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0159.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0101.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0118.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0199.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0191.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0005.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0176.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0031.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0070.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0149.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0163.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0036.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0187.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0004.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0018.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0109.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0167.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0186.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0156.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0042.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0065.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0076.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0078.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0155.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0008.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0125.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0169.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0117.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0047.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0189.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0095.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0017.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0053.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0012.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0083.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0175.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0190.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0178.jpg",
+      "label": 1
+    }
+  ],
+  "val_select": [
+    {
+      "filename": "images/smoke_0058.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0001.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0014.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0041.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0082.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0002.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0032.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0171.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0141.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0068.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0020.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0180.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0052.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0108.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0122.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0136.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0094.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0196.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0140.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0111.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0046.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0184.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0142.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0197.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0162.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0164.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0063.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0054.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0067.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0100.jpg",
+      "label": 1
+    }
+  ],
+  "val_calib": [
+    {
+      "filename": "images/smoke_0104.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0127.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0043.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0099.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0103.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0138.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0134.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0106.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0050.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0051.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0023.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0195.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0097.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0144.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0170.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0059.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0048.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0037.jpg",
+      "label": 0
+    }
+  ],
+  "val_test": [
+    {
+      "filename": "images/smoke_0161.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0147.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0021.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0079.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0029.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0150.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0074.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0132.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0071.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0092.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0133.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0146.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0143.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0172.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0075.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0084.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0194.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0177.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0057.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0060.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0061.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0087.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0114.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0107.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0098.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0056.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0126.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0102.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0113.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0151.jpg",
+      "label": 1
+    },
+    {
+      "filename": "images/smoke_0091.jpg",
+      "label": 0
+    },
+    {
+      "filename": "images/smoke_0086.jpg",
+      "label": 0
+    }
+  ]
+}

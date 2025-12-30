@@ -63,10 +63,10 @@ hardware:
 
 # Data splits (4-way split for zero leakage)
 splits:
-  train_ratio: 0.7
-  val_select_ratio: 0.1  # For model selection (early stopping)
-  val_calib_ratio: 0.1   # For policy fitting (threshold, gate, SCRC)
-  val_test_ratio: 0.1    # For final evaluation ONLY
+  train_ratio: 0.60
+  val_select_ratio: 0.15  # For model selection (early stopping)
+  val_calib_ratio: 0.15   # For policy fitting (threshold, gate, SCRC)
+  val_test_ratio: 0.10    # For final evaluation ONLY
 
 # Multi-view inference
 multiview:

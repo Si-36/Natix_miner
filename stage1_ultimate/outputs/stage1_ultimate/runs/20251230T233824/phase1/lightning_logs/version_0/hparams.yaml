@@ -1,0 +1,26 @@
+backbone_name: facebook/deit-tiny-patch16-224
+num_classes: 2
+freeze_backbone: true
+head_type: linear
+dropout_rate: 0.3
+learning_rate: 0.0003
+weight_decay: 0.01
+use_ema: true
+ema_decay: 0.9999
+use_multiview: false
+multiview_aggregation: topk_mean
+multiview_topk: 2
+multiview_grid_size:
+- 3
+- 3
+multiview_overlap: 0.15
+data_root: outputs/smoke_data/natix_subset
+splits_json: /home/sina/projects/miner_b/stage1_ultimate/outputs/stage1_ultimate/runs/20251230T233824/splits.json
+batch_size: 8
+num_workers: 0
+pin_memory: true
+persistent_workers: true
+max_samples: 100
+eval_mode: center_crop_224
+eval_canvas_size: 896
+val_batch_size: null

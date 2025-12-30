@@ -1,0 +1,15 @@
+{
+  "executions": {
+    "phase1_baseline": {
+      "phase_type": "phase1_baseline",
+      "status": "failed",
+      "start_time": 1767123779.2839007,
+      "end_time": 1767123779.2839668,
+      "duration_seconds": 6.604194641113281e-05,
+      "duration_minutes": 1.1006991068522134e-06,
+      "error_message": "Phase Phase 1: Baseline Training missing required inputs:\n  - /home/sina/projects/miner_b/stage1_ultimate/outputs/stage1_ultimate/runs/20251230T231259/splits.json"
+    }
+  },
+  "start_time": 1767123779.283805,
+  "end_time": null
+}

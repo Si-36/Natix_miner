@@ -1,0 +1,14 @@
+{
+  "backbone_id": "facebook/deit-tiny-patch16-224",
+  "batch_size": 8,
+  "best_checkpoint": "/home/sina/projects/miner_b/stage1_ultimate/outputs/stage1_ultimate/runs/20251230T233824/phase1/model_best.pth",
+  "init_from_explora": false,
+  "learning_rate": 0.0003,
+  "max_epochs": 1,
+  "monitor_metric": "val_select/acc",
+  "num_classes": 2,
+  "val_calib_accuracy": 0.3888888888888889,
+  "val_calib_fnr": 0.2222222222222222,
+  "val_calib_mcc": -0.3535533905932738,
+  "weight_decay": 0.01
+}
