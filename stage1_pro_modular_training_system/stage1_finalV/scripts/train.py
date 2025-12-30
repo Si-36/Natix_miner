@@ -37,6 +37,7 @@ def parse_args():
         choices=[
             "train_baseline_head",
             "train_explora_head",
+            "train_explora_ddp",
             "export_calib_logits",
             "sweep_thresholds",
         ],

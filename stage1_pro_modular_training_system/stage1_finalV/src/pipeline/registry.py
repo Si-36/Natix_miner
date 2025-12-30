@@ -51,6 +51,7 @@ class StepRegistry:
         from steps.sweep_thresholds import SweepThresholdsSpec
         from steps.train_baseline_head import TrainBaselineHeadSpec
         from steps.train_explora_head import TrainExploraHeadSpec
+        from steps.train_explora_ddp import TrainExploraDdpSpec
 
         # Register steps
         self._step_specs = {
@@ -58,6 +59,7 @@ class StepRegistry:
             "export_calib_logits": ExportCalibLogitsSpec,
             "sweep_thresholds": SweepThresholdsSpec,
             "train_explora_head": TrainExploraHeadSpec,
+            "train_explora_ddp": TrainExploraDdpSpec,
         }
 
         # Build dependency graph

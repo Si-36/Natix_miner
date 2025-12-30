@@ -255,10 +255,18 @@ class TrainBaselineHeadSpec(StepSpec):
         print(f"   ✅ Model created and moved to device: {device}")
 
         # Setup model (create backbone, head, model, criterion, optimizer)
-        lightning_module.setup(
-            train_loader=train_loader_dict.get("train"),
-            val_select_loader=train_loader_dict.get("val_select"),
-        )
+        if has_real_data:
+            lightning_module.setup_model(
+                train_loader=datamodule.train_loader,
+                val_select_loader=datamodule.val_select_loader,
+                val_calib_loader=datamodule.val_calib_loader,
+            )
+        else:
+            lightning_module.setup_model(
+                train_loader=train_loader_dict["train"],
+                val_select_loader=train_loader_dict["val_select"],
+                val_calib_loader=None,
+            )
 
         # Get optimizer and criterion from module (already created in setup())
         optimizer = lightning_module.optimizer

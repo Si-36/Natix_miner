@@ -39,6 +39,7 @@ dependencies = [
     "pillow>=11.0.0",
     "tqdm>=4.66.0",
     "rich>=13.9.0",
+    "matplotlib>=3.9.0",  # For threshold curve plotting
 ]
 
 [project.optional-dependencies]
@@ -114,7 +115,7 @@ include = '\.pyi?$'
 [tool.isort]
 profile = "black"
 line_length = 100
-known_first_party = ["src"]
+known_first_party = ["src", "streetvision"]
 
 # MyPy configuration
 [tool.mypy]

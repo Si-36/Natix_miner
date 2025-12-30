@@ -113,9 +113,15 @@ checkpointing:
   save_ema: true         # Save EMA model
   ema_decay: 0.9999
 
-# Hydra configuration
+# Hydra configuration (2025 production-grade run isolation)
 hydra:
   run:
-    dir: outputs/${experiment_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}  # Timestamped runs
+    # ISO 8601 timestamp format for sortable run directories
+    # Format: outputs/stage1_ultimate/runs/20251230T123456
+    # Benefits:
+    # - Each run gets isolated directory (no file conflicts)
+    # - Lexicographically sortable by time
+    # - Manifest-last commit ensures complete runs
+    dir: outputs/${experiment_name}/runs/${now:%Y%m%dT%H%M%S}
   job:
-    chdir: false  # Don't change working directory - keeps paths predictable!
+    chdir: false  # CRITICAL: Don't change CWD - keeps data paths stable!

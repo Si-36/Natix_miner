@@ -58,6 +58,23 @@ class Phase1LightningModuleConfig:
     compile_model: bool = False  # torch.compile support (30-50% speedup)
     save_calibration_data: bool = True  # Export calibration artifacts (VAL_CALIB)
 
+    # PEFT/ExPLoRA config (2026 Pro)
+    peft_enabled: bool = False
+    peft_r: int = 16
+    peft_alpha: int = 32
+    peft_dropout: float = 0.05
+    peft_target_modules: list = field(
+        default_factory=lambda: [
+            "model.model.layer.*.attention.q_proj",
+            "model.model.layer.*.attention.v_proj",
+        ]
+    )
+
+    # DDP config
+    ddp_enabled: bool = False
+    num_gpus: int = 1
+    accumulate_grad_batches: int = 1
+
 
 @dataclass
 class TrainingMetrics:
@@ -124,7 +141,7 @@ class Phase1LightningModule(pl.LightningModule):
         # Mixed precision
         self.use_amp = config.precision == "bf16"  # Mixed precision
 
-    def setup(
+    def setup_model(
         self,
         train_loader: DataLoader,
         val_select_loader: DataLoader = None,
@@ -149,7 +166,7 @@ class Phase1LightningModule(pl.LightningModule):
         print("-" * 70)
 
         # Convert precision string to torch dtype
-        dtype = torch.float16 if self.config.precision == "bf16" else torch.float32
+        dtype = torch.bfloat16 if self.config.precision == "bf16" else torch.float32
 
         self.backbone = DINOv3Backbone(
             model_id=self.config.model_id,
@@ -157,6 +174,28 @@ class Phase1LightningModule(pl.LightningModule):
             freeze_backbone=self.config.freeze_backbone,
             compile_model=self.config.compile_model,
         )
+
+        # Apply PEFT/ExPLoRA if enabled
+        if self.config.peft_enabled:
+            print(f"   🎨 Applying PEFT/ExPLoRA adapters...")
+            print("-" * 70)
+            from peft import LoraConfig, get_peft_model, TaskType
+
+            peft_cfg = LoraConfig(
+                r=self.config.peft_r,
+                lora_alpha=self.config.peft_alpha,
+                lora_dropout=self.config.peft_dropout,
+                bias="none",
+                target_modules=[f"layer.{i}.attention.q_proj" for i in range(12)]
+                + [f"layer.{i}.attention.v_proj" for i in range(12)],
+                task_type=TaskType.FEATURE_EXTRACTION,
+                inference_mode=False,
+            )
+
+            self.backbone = get_peft_model(self.backbone, peft_cfg)
+            print(
+                f"   ✅ PEFT adapters applied (r={self.config.peft_r}, alpha={self.config.peft_alpha})"
+            )
 
         # Move to device
         self.backbone = self.backbone.to(self.device)
@@ -182,14 +221,26 @@ class Phase1LightningModule(pl.LightningModule):
         self.head = self.head.to(self.device)
         print(f"   ✅ Head created")
 
-        # 3. Combine backbone + head
-        self.model = nn.Sequential(
-            self.backbone,
-            self.head,
-        )
+        # 3. Combine backbone + head (with PEFT wrapper support)
+        if hasattr(self.backbone, "get_peft_model"):
+            # PEFT model - create custom forward
+            class PEFTModel(nn.Module):
+                def __init__(self, backbone, head):
+                    super().__init__()
+                    self.backbone = backbone
+                    self.head = head
+
+                def forward(self, pixel_values):
+                    # Call PEFT model with correct argument name
+                    features = self.backbone(pixel_values=pixel_values)
+                    return self.head(features)
+
+            self.model = PEFTModel(self.backbone, self.head)
+        else:
+            self.model = nn.Sequential(self.backbone, self.head)
 
         print(
-            f"   🧱 Model architecture: {type(self.backbone).__name__} → {type(self.head).__name__}"
+            f"   🧱 Model architecture: {self.backbone.__class__.__name__} → {self.head.__class__.__name__}"
         )
         print(f"   ✅ Model assembled")
 
@@ -408,11 +459,11 @@ class Phase1LightningModule(pl.LightningModule):
 
             print(f"   ✅ Scheduler configured: {self.config.scheduler_name}")
 
-            # ✅ LIGHTNING CONTRACT: Return optimizer, scheduler
-            return optimizer, scheduler
+            # ✅ LIGHTNING CONTRACT: Return [optimizer, scheduler]
+            return [optimizer], [scheduler]
 
         # ✅ LIGHTNING CONTRACT: Return optimizer only (no scheduler)
-        return optimizer
+        return [optimizer]
 
     def train_dataloader(self) -> DataLoader:
         """Placeholder - will be replaced by engine."""
