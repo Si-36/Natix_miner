@@ -5,6 +5,35 @@ Latest 2025-2026 best practices | Zero data leakage | Fail-fast validation
 
 ---
 
+## ⚠️ IMPORTANT: Precision Safety (Read This First!)
+
+**This repo uses safe-by-default precision settings to prevent NaN issues.**
+
+| Environment | Precision | Override Required? |
+|------------|-----------|-------------------|
+| **Local/Dev** | **FP32** (default) | ❌ No - already safe |
+| **Rental GPU (H100/A100)** | **BFloat16** | ✅ Yes - enable for speed |
+| **NEVER** | ~~FP16~~ | ❌ Overflows with DINOv3! |
+
+**Quick start (local dev):**
+```bash
+# FP32 is already default - just run
+python scripts/train_cli.py pipeline.phases=[phase1] training.epochs=1
+```
+
+**For rental GPU (H100/A100):**
+```bash
+# Enable BFloat16 for 2x speedup
+python scripts/train_cli.py \
+  pipeline.phases=[phase1] \
+  training.mixed_precision.enabled=true \
+  training.mixed_precision.dtype=bfloat16
+```
+
+**📖 Full details:** See [docs/PRECISION_SAFETY.md](docs/PRECISION_SAFETY.md) for complete guide.
+
+---
+
 ## 🎯 What's Implemented (Tier 0: DAG Pipeline Infrastructure)
 
 ### ✅ Completed TODOs (121-127)

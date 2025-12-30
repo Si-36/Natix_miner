@@ -19,9 +19,9 @@
 #   5. Save merged checkpoint for Phase 1 fine-tuning
 #
 # Hardware requirements:
-#   - 4 GPUs (A100 40GB recommended)
-#   - ~24 hours training time
-#   - ~160GB total VRAM (40GB per GPU)
+#   - 2-4 GPUs (A6000 48GB or A100 40GB)
+#   - ~24-48 hours training time (longer on 2 GPUs)
+#   - ~96GB total VRAM for 2 GPUs (48GB per GPU)
 #
 # Use this config to run Phase 4 ExPLoRA training.
 
@@ -48,7 +48,7 @@ lora:
 
 # Classification head (for extended pretraining only)
 head:
-  num_classes: 13  # NATIX has 13 roadwork classes
+  num_classes: 2  # Binary: roadwork vs not-roadwork
   hidden_size: 1280  # DINOv2 Giant hidden size
 
 # Training hyperparameters
@@ -57,7 +57,7 @@ training:
   weight_decay: 0.01  # AdamW weight decay
   warmup_epochs: 2  # Linear warmup epochs
   max_epochs: 100  # Total training epochs (extended pretraining)
-  batch_size: 16  # Per-GPU batch size (total: 64 with 4 GPUs)
+  batch_size: 16  # Per-GPU batch size (total: 32 with 2 GPUs, 64 with 4 GPUs)
   num_workers: 4  # DataLoader workers per GPU
   gradient_clip_val: 1.0  # Gradient clipping for stability
 
@@ -69,7 +69,7 @@ optimization:
 # Distributed training
 distributed:
   strategy: ddp  # Distributed Data Parallel
-  num_gpus: 4  # 4 GPUs for training
+  num_gpus: 2  # 2 GPUs (adjust to 4 if available)
   find_unused_parameters: false  # DDP optimization
 
 # Early stopping

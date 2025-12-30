@@ -1,9 +1,16 @@
+#!/usr/bin/env python3
+"""
+Tier 0 CLI - Training Pipeline Entry Point
+"""
+
 import sys
 import argparse
 from pathlib import Path
 from datetime import datetime
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# Add src to path
+_project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(_project_root / "src"))
 
 from pipeline.artifacts import ArtifactStore, ArtifactKey
 from pipeline.contracts import Split, assert_allowed
@@ -88,10 +95,10 @@ def run_pipeline(args):
             manifest=manifest,
             metadata={"cli": True, "target_step": target_step},
         )
+
         try:
             step_spec = step_spec_class()
             result = step_spec.run(ctx)
-
             print(f"Completed: {step_name}, artifacts: {result.artifacts_written}")
         except Exception as e:
             print(f"Failed: {step_name}, error: {e}")
@@ -99,18 +106,11 @@ def run_pipeline(args):
 
     print("=" * 70)
     print("Pipeline completed!")
-
     print()
-    print("Artifacts:")
-    manifest_dict = manifest.to_dict()
-    steps_dict = manifest_dict.get("steps", {})
-    for step_name in execution_order:
-        step_info = steps_dict.get(step_name, {})
-        if step_info and "artifacts" in step_info:
-            for artifact_key in step_info["artifacts"]:
-                path = artifact_store.get(ArtifactKey[artifact_key], run_id=run_id)
-                if path and path.exists():
-                    print(f"  {artifact_key}: {path}")
 
-    print()
-    print("Run complete!")
+def main():
+    args = parse_args()
+    run_pipeline(args)
+
+if __name__ == "__main__":
+    main()

@@ -64,9 +64,16 @@ gradient_clipping:
   max_norm: 1.0
 
 # Mixed precision training
+# SAFE-BY-DEFAULT PRECISION RULES:
+#   Local/Dev:       FP32 (slow but safest, no NaN debugging needed)
+#   Rental GPU H100: BFloat16 (FP32-like range, fast, no overflow)
+#   AVOID FP16:      DINOv3 features overflow in FP16 → NaN logits!
+#
+# To enable BFloat16 on rental GPU (H100/A100):
+#   training.mixed_precision.enabled=true training.mixed_precision.dtype=bfloat16
 mixed_precision:
-  enabled: true
-  dtype: float16  # or bfloat16 for H100
+  enabled: false  # SAFE DEFAULT: FP32 for local dev (prevents NaN)
+  dtype: bfloat16  # Use BFloat16 on rental GPU (NOT float16!)
 
 # Distributed training (FSDP2)
 distributed:

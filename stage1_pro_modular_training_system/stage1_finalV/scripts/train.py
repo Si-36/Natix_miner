@@ -1,22 +1,13 @@
 #!/usr/bin/env python3
 """
 Tier 0 CLI - Training Pipeline Entry Point
-
-This script provides a simple CLI to run the modular training pipeline.
-It uses DAG engine to orchestrate train → export → sweep.
-
-Usage:
-    python scripts/train.py --target_step sweep_thresholds --training.num_epochs 1
-    python scripts/train.py --data.synthetic --training.num_epochs 10
 """
 
 import sys
 import argparse
 from pathlib import Path
-from typing import Optional
 from datetime import datetime
 
-# Add src to path (use absolute path from project root)
 _project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(_project_root / "src"))
 
@@ -26,12 +17,10 @@ from pipeline.step_api import StepContext, StepSpec
 from pipeline.manifest import RunManifest
 from pipeline.registry import StepRegistry, resolve_execution_order
 
-# Import steps
 from steps.train_baseline_head import TrainBaselineHeadSpec
 from steps.export_calib_logits import ExportCalibLogitsSpec
 from steps.sweep_thresholds import SweepThresholdsSpec
 
-# Global registry
 _step_registry = StepRegistry()
 
 
@@ -93,7 +82,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def generate_run_id() -> str:
+def generate_run_id():
     now = datetime.now()
     return now.strftime("%Y%m%dT%H%M%S")
 
@@ -109,7 +98,7 @@ def run_pipeline(args):
     else:
         run_id = generate_run_id()
 
-    print(f"📋 Run ID: {run_id}")
+    print(f"Run ID: {run_id}")
     print()
 
     config = {
@@ -124,7 +113,7 @@ def run_pipeline(args):
         "data_synthetic": args.synthetic,
     }
 
-    print(f"\n⚙️ Final config:")
+    print("\nFinal config:")
     print(f"   Model ID: {config['model_id']}")
     print(f"   Hidden dim: {config['hidden_dim']}")
     print(f"   Num classes: {config['num_classes']}")
@@ -138,32 +127,29 @@ def run_pipeline(args):
     artifact_root.mkdir(parents=True, exist_ok=True)
 
     artifact_store = ArtifactStore(artifact_root)
-    print(f"💾 Artifact root: {artifact_root}")
+    print(f"Artifact root: {artifact_root}")
     print()
 
-    manifest = RunManifest(
-        run_id=run_id,
-        resolved_config=config,
-    )
-    print(f"📊 Manifest initialized: {run_id}")
+    manifest = RunManifest(run_id=run_id, resolved_config=config)
+    print(f"Manifest initialized: {run_id}")
     print()
 
     target_step = args.target_step
-    print(f"🎯 Target step: {target_step}")
+    print(f"Target step: {target_step}")
     print()
 
     try:
         execution_order = _step_registry.resolve_execution_order(target_step)
     except ValueError as e:
-        print(f"❌ DAG resolution failed: {e}")
+        print(f"DAG resolution failed: {e}")
         sys.exit(1)
 
-    print(f"🔗 Execution order: {' → '.join(execution_order)}")
+    print(f"Execution order: {' -> '.join(execution_order)}")
     print()
 
     for step_name in execution_order:
         print("=" * 70)
-        print(f"🎯 Running step: {step_name}")
+        print(f"Running: {step_name}")
         print("-" * 70)
 
         step_spec_class = _step_registry._step_specs[step_name]
@@ -180,36 +166,31 @@ def run_pipeline(args):
         try:
             step_spec = step_spec_class()
             result = step_spec.run(ctx)
-
-            print(f"✅ Step completed: {step_name}")
-            print(f"   Artifacts written: {result.artifacts_written}")
-            print(f"   Splits used: {result.splits_used}")
-            print()
-
+            print(f"Completed: {step_name}")
+            print(f"   Artifacts: {result.artifacts_written}")
         except Exception as e:
-            print(f"❌ Step failed: {step_name}")
+            print(f"Failed: {step_name}")
             print(f"   Error: {e}")
-            import traceback
-
-            traceback.print_exc()
             sys.exit(1)
 
     print("=" * 70)
-    print("🎉 Pipeline completed successfully!")
-    print("=" * 70)
+    print("Pipeline completed!")
     print()
 
-    print("📊 Artifacts created:")
+    print("Artifacts created:")
+    manifest_dict = manifest.to_dict()
+    steps_dict = manifest_dict.get("steps", {})
     for step_name in execution_order:
-        step_info = manifest._steps.get(step_name, {})
+        step_info = steps_dict.get(step_name, {})
         if step_info and "artifacts" in step_info:
             for artifact_key in step_info["artifacts"]:
                 path = artifact_store.get(ArtifactKey[artifact_key], run_id=run_id)
                 if path and path.exists():
-                    print(f"   ✅ {artifact_key}: {path}")
+                    print(f"   {artifact_key}: {path}")
 
     print()
-    print("Run complete! ✅")
+    print("Run complete!")
+    print()
 
 
 def main():
