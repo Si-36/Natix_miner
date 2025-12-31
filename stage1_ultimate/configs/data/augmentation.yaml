@@ -1,0 +1,56 @@
+# Data Augmentation Configuration (2025 Best Practices)
+# ==============================================================================
+# 
+# 2025 Upgrades:
+# - TrivialAugmentWide v2 (torchvision.transforms.v2)
+# - AugMix (robust augmentation)
+# - RandomErasing (with MCC-safe gate)
+
+# Training Augmentations
+train:
+  # Basic augmentations
+  horizontal_flip:
+    enabled: true
+    probability: 0.5
+  
+  rotation:
+    enabled: true
+    degrees: 15  # ±15 degrees
+  
+  color_jitter:
+    enabled: true
+    brightness: 0.2
+    contrast: 0.2
+    saturation: 0.2
+    hue: 0.1
+  
+  # Advanced augmentations (2025)
+  trivial_augment_wide:
+    enabled: true
+    num_magnitude_bins: 31  # TrivialAugmentWide v2
+  
+  aug_mix:
+    enabled: true
+    severity: 3
+    mixture_width: 3
+    alpha: 1.0
+  
+  random_erasing:
+    enabled: false  # Disabled by default (can hurt MCC if not careful)
+    probability: 0.1
+    scale: [0.02, 0.33]
+    ratio: [0.3, 3.3]
+  
+  # Normalization
+  normalize:
+    mean: [0.485, 0.456, 0.406]  # ImageNet mean
+    std: [0.229, 0.224, 0.225]   # ImageNet std
+
+# Validation/Test Augmentations (minimal)
+val:
+  resize: 256
+  center_crop: 224
+  normalize:
+    mean: [0.485, 0.456, 0.406]
+    std: [0.229, 0.224, 0.225]
+
