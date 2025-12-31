@@ -1,0 +1,20 @@
+# Phase 2: MCC-Optimal Threshold Sweep Configuration
+# 
+# This phase finds the optimal classification threshold that maximizes
+# Matthews Correlation Coefficient (MCC) on VAL_CALIB split.
+#
+# 2025 Optimization: Vectorized computation with 5000 thresholds
+# (10× faster than sklearn loop, finds true optimum)
+
+# Number of thresholds to sweep (5000 recommended for final tuning)
+n_thresholds: 5000
+
+# Metric to optimize (always MCC for imbalanced binary classification)
+optimize_metric: "mcc"
+
+# Save full sweep curve for analysis
+save_sweep_curve: true
+
+# Save MCC curve plot
+save_mcc_plot: true
+

@@ -161,6 +161,11 @@ class ArtifactSchema:
         """Detailed threshold sweep results"""
         return self.phase2_dir / "threshold_sweep.csv"
 
+    @property
+    def mcc_curve_plot(self) -> Path:
+        """MCC curve visualization plot"""
+        return self.phase2_dir / "mcc_curve.png"
+
     # ============= PHASE 3: Gate Head Training =============
 
     @property

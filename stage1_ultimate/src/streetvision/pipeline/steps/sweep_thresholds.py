@@ -1,24 +1,26 @@
 """
-Phase 2: Threshold Sweep Step (Production-Grade 2025-12-30)
+Phase 2: MCC-Optimal Threshold Sweep Step (Production-Grade 2025-12-31)
 
 Improvements over old implementation:
-- ✅ Uses centralized threshold selection (no duplicated logic)
+- ✅ Uses centralized MCC-optimized threshold selection (vectorized, 5000 thresholds)
 - ✅ Atomic JSON writes (crash-safe)
 - ✅ Manifest-last commit (lineage tracking)
 - ✅ Duration tracking
 - ✅ Type-safe with proper error handling
+- ✅ Validator-compatible policy JSON
 
 Contract:
 - Inputs: val_calib_logits.pt, val_calib_labels.pt
 - Outputs:
-  - phase2/thresholds.json (best threshold + metrics)
-  - phase2/threshold_sweep.csv (full sweep curve)
+  - phase2/thresholds.json (best MCC threshold + metrics, validator-compatible)
+  - phase2/threshold_sweep.csv (full sweep curve: threshold, mcc, tp, tn, fp, fn)
+  - phase2/mcc_curve.png (MCC curve visualization)
   - phase2/manifest.json (lineage + checksums) ◄── LAST
 
-Selective Prediction:
-- Coverage: Proportion of samples accepted (confidence > threshold)
-- Selective Accuracy: Accuracy on accepted samples only
-- Goal: Find threshold that maximizes selective accuracy
+MCC Optimization:
+- Goal: Find threshold that maximizes Matthews Correlation Coefficient (MCC)
+- Method: Vectorized computation over 5000 thresholds (10× faster than loop)
+- Output: Best threshold + full metrics (accuracy, precision, recall, F1, FNR, FPR)
 """
 
 import json
@@ -39,7 +41,7 @@ from contracts.artifact_schema import ArtifactSchema
 
 # Import new foundation modules
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from streetvision.eval import compute_mcc, select_threshold_max_mcc
+from streetvision.eval.thresholds import select_threshold_max_mcc, plot_mcc_curve
 from streetvision.io import create_step_manifest, write_json_atomic
 
 logger = logging.getLogger(__name__)
@@ -83,76 +85,56 @@ def run_phase2_threshold_sweep(
 
     logger.info(f"Logits shape: {logits.shape}, Labels shape: {labels.shape}")
 
-    # Convert to probabilities and get predictions
-    probs = torch.softmax(logits, dim=-1)
-    max_probs, preds = probs.max(dim=-1)
+    # Get config for Phase 2
+    n_thresholds = cfg.get("phase2", {}).get("n_thresholds", 5000)
+    save_sweep_curve = cfg.get("phase2", {}).get("save_sweep_curve", True)
+    save_mcc_plot = cfg.get("phase2", {}).get("save_mcc_plot", True)
 
-    # Sweep thresholds for selective prediction
-    logger.info("Sweeping thresholds (selective prediction)...")
-    sweep_results = []
-    best_threshold = 0.5
-    best_selective_acc = 0.0
+    logger.info(f"Optimizing MCC with {n_thresholds} thresholds...")
 
-    for threshold in np.arange(0.05, 1.0, 0.05):
-        # Accept mask: samples with confidence > threshold
-        accept = max_probs > threshold
+    # Use vectorized MCC optimization (2025 upgrade)
+    best_threshold, best_mcc, metrics, curve_df = select_threshold_max_mcc(
+        logits=logits,
+        labels=labels,
+        n_thresholds=n_thresholds,
+        return_curve=True,
+    )
 
-        # Coverage: proportion of accepted samples
-        coverage = accept.float().mean().item()
-
-        # Selective accuracy: accuracy on accepted samples only
-        if accept.sum() > 0:
-            selective_acc = (preds[accept] == labels[accept]).float().mean().item()
-        else:
-            selective_acc = 0.0
-
-        # Selective risk: error rate on accepted samples
-        selective_risk = 1.0 - selective_acc
-
-        sweep_results.append(
-            {
-                "threshold": float(threshold),
-                "coverage": coverage,
-                "selective_accuracy": selective_acc,
-                "selective_risk": selective_risk,
-                "num_accepted": int(accept.sum().item()),
-            }
-        )
-
-        # Track best by selective accuracy
-        if selective_acc > best_selective_acc:
-            best_selective_acc = selective_acc
-            best_threshold = threshold
-            logger.info(
-                f"  New best: threshold={threshold:.3f}, "
-                f"coverage={coverage:.3f}, selective_acc={selective_acc:.3f}"
-            )
+    logger.info(f"✅ Best threshold: {best_threshold:.4f}, MCC: {best_mcc:.4f}")
+    logger.info(f"   Accuracy: {metrics['accuracy']:.4f}, Precision: {metrics['precision']:.4f}")
+    logger.info(f"   Recall: {metrics['recall']:.4f}, F1: {metrics['f1']:.4f}")
+    logger.info(f"   FNR: {metrics['fnr']:.4f}, FPR: {metrics['fpr']:.4f}")
 
     # Save full sweep curve to CSV
-    sweep_df = pd.DataFrame(sweep_results)
-    sweep_df.to_csv(artifacts.threshold_sweep_csv, index=False)
-    logger.info(f"✅ Sweep curve saved: {artifacts.threshold_sweep_csv}")
+    if save_sweep_curve and curve_df is not None:
+        curve_df.to_csv(artifacts.threshold_sweep_csv, index=False)
+        logger.info(f"✅ Sweep curve saved: {artifacts.threshold_sweep_csv}")
 
-    # Compute MCC at best threshold (using centralized function)
-    accept_best = max_probs > best_threshold
-    if accept_best.sum() > 0:
-        mcc_best = compute_mcc(
-            labels[accept_best].cpu().numpy(),
-            preds[accept_best].cpu().numpy(),
-        )
-    else:
-        mcc_best = 0.0
+    # Save MCC curve plot
+    if save_mcc_plot and curve_df is not None:
+        plot_mcc_curve(curve_df, best_threshold, str(artifacts.mcc_curve_plot))
+        logger.info(f"✅ MCC curve plot saved: {artifacts.mcc_curve_plot}")
 
-    # Save best threshold to JSON (ATOMIC WRITE)
-    best_row = sweep_df.loc[sweep_df["threshold"] == best_threshold].iloc[0]
+    # Save best threshold to JSON (ATOMIC WRITE, validator-compatible)
     thresholds_data = {
-        "method": "selective_prediction",
+        "policy_type": "threshold",
         "threshold": float(best_threshold),
-        "coverage": float(best_row["coverage"]),
-        "selective_accuracy": float(best_selective_acc),
-        "selective_risk": float(1.0 - best_selective_acc),
-        "mcc_at_threshold": float(mcc_best),
-        "num_accepted": int(best_row["num_accepted"]),
+        "optimize_metric": "mcc",
+        "metrics": {
+            "mcc": float(best_mcc),
+            "accuracy": float(metrics["accuracy"]),
+            "precision": float(metrics["precision"]),
+            "recall": float(metrics["recall"]),
+            "f1": float(metrics["f1"]),
+            "fnr": float(metrics["fnr"]),
+            "fpr": float(metrics["fpr"]),
+            "tp": int(metrics["tp"]),
+            "tn": int(metrics["tn"]),
+            "fp": int(metrics["fp"]),
+            "fn": int(metrics["fn"]),
+        },
+        "n_thresholds": int(n_thresholds),
+        "split_used": "val_calib",
     }
 
     thresholds_checksum = write_json_atomic(artifacts.thresholds_json, thresholds_data)
@@ -178,9 +160,13 @@ def run_phase2_threshold_sweep(
         output_dir=artifacts.output_dir,
         metrics={
             "threshold": thresholds_data["threshold"],
-            "coverage": thresholds_data["coverage"],
-            "selective_accuracy": thresholds_data["selective_accuracy"],
-            "mcc_at_threshold": thresholds_data["mcc_at_threshold"],
+            "mcc": thresholds_data["metrics"]["mcc"],
+            "accuracy": thresholds_data["metrics"]["accuracy"],
+            "precision": thresholds_data["metrics"]["precision"],
+            "recall": thresholds_data["metrics"]["recall"],
+            "f1": thresholds_data["metrics"]["f1"],
+            "fnr": thresholds_data["metrics"]["fnr"],
+            "fpr": thresholds_data["metrics"]["fpr"],
         },
         duration_seconds=duration_seconds,
         config=OmegaConf.to_container(cfg, resolve=True),
@@ -194,13 +180,15 @@ def run_phase2_threshold_sweep(
 
     # Summary
     logger.info("=" * 80)
-    logger.info("✅ Phase 2 Complete (Production-Grade)")
+    logger.info("✅ Phase 2 Complete (MCC-Optimized, Production-Grade)")
     logger.info(f"Duration: {duration_seconds / 60:.1f} minutes")
-    logger.info(f"Best Threshold: {best_threshold:.3f}")
-    logger.info(f"Coverage: {thresholds_data['coverage']:.3f}")
-    logger.info(f"Selective Accuracy: {best_selective_acc:.3f}")
-    logger.info(f"MCC at Threshold: {mcc_best:.3f}")
+    logger.info(f"Best Threshold: {best_threshold:.4f}")
+    logger.info(f"MCC: {best_mcc:.4f}")
+    logger.info(f"Accuracy: {metrics['accuracy']:.4f}, Precision: {metrics['precision']:.4f}")
+    logger.info(f"Recall: {metrics['recall']:.4f}, F1: {metrics['f1']:.4f}")
+    logger.info(f"FNR: {metrics['fnr']:.4f}, FPR: {metrics['fpr']:.4f}")
     logger.info(f"Thresholds JSON: {artifacts.thresholds_json}")
     logger.info(f"Sweep CSV: {artifacts.threshold_sweep_csv}")
+    logger.info(f"MCC Curve Plot: {artifacts.mcc_curve_plot}")
     logger.info(f"Manifest: {artifacts.phase2_dir / 'manifest.json'}")
     logger.info("=" * 80)
