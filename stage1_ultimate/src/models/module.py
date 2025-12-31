@@ -68,8 +68,8 @@ class EMA:
         self.decay = decay
 
         # Store shadow parameters (EMA weights)
-        self.shadow = {}
-        self.backup = {}
+        self.shadow: dict[str, torch.Tensor] = {}
+        self.backup: dict[str, torch.Tensor] = {}
 
         # Initialize shadow parameters
         for name, param in model.named_parameters():
@@ -92,9 +92,7 @@ class EMA:
             if param.requires_grad and name in self.shadow:
                 # Ensure shadow is on same device as param (handles CPU->CUDA migration)
                 shadow = self.shadow[name].to(param.device)
-                self.shadow[name] = (
-                    self.decay * shadow + (1 - self.decay) * param.data
-                )
+                self.shadow[name] = self.decay * shadow + (1 - self.decay) * param.data
 
     @torch.no_grad()
     def apply_shadow(self) -> None:
@@ -209,7 +207,7 @@ class DINOv3Classifier(L.LightningModule):
         )
 
         head = create_classification_head(
-            hidden_size=backbone.hidden_size,
+            hidden_size=int(backbone.hidden_size),  # type: ignore[arg-type]
             num_classes=num_classes,
             head_type=head_type,
             dropout_rate=dropout_rate,
@@ -217,10 +215,12 @@ class DINOv3Classifier(L.LightningModule):
 
         # CRITICAL FIX: Wrap in ModuleDict so EMA tracks ONLY model params
         # (not metrics, optimizers, or other LightningModule state)
-        self.net = nn.ModuleDict({
-            "backbone": backbone,
-            "head": head,
-        })
+        self.net = nn.ModuleDict(
+            {
+                "backbone": backbone,
+                "head": head,
+            }
+        )
 
         # Loss function
         self.criterion = nn.CrossEntropyLoss()
@@ -286,7 +286,8 @@ class DINOv3Classifier(L.LightningModule):
         """
         if self.use_ema and self.ema is None:
             # CRITICAL FIX: EMA tracks self.net (ModuleDict), not entire LightningModule
-            self.ema = EMA(self.net, decay=self.hparams.ema_decay)
+            ema_decay_val = self.hparams.get("ema_decay")  # type: ignore[attr-defined]
+            self.ema = EMA(self.net, decay=ema_decay_val)  # type: ignore[arg-type]
             logger.info("EMA initialized (tracking only model params)")
 
     def forward(
@@ -320,7 +321,9 @@ class DINOv3Classifier(L.LightningModule):
 
         return logits
 
-    def training_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def training_step(
+        self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> torch.Tensor:
         """
         Training step
 
@@ -427,14 +430,42 @@ class DINOv3Classifier(L.LightningModule):
             preds = torch.argmax(logits, dim=-1)
             acc = (preds == labels).float().mean()
 
-            self.log("val_select/loss", loss, on_step=False, on_epoch=True, prog_bar=True, add_dataloader_idx=False)
-            self.log("val_select/acc", acc, on_step=False, on_epoch=True, prog_bar=True, add_dataloader_idx=False)
+            self.log(
+                "val_select/loss",
+                loss,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+                add_dataloader_idx=False,
+            )
+            self.log(
+                "val_select/acc",
+                acc,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+                add_dataloader_idx=False,
+            )
 
             # Also log without prefix for compatibility
-            self.log("val/loss", loss, on_step=False, on_epoch=True, prog_bar=False, add_dataloader_idx=False)
+            self.log(
+                "val/loss",
+                loss,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=False,
+                add_dataloader_idx=False,
+            )
         else:
             # val_calib: For calibration (save logits!)
-            self.log("val_calib/loss", loss, on_step=False, on_epoch=True, prog_bar=False, add_dataloader_idx=False)
+            self.log(
+                "val_calib/loss",
+                loss,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=False,
+                add_dataloader_idx=False,
+            )
 
             # CRITICAL FIX: Return logits/labels so callback can reuse them
             # (no extra forward pass needed in callback)
@@ -482,15 +513,16 @@ class DINOv3Classifier(L.LightningModule):
         # AdamW optimizer
         optimizer = torch.optim.AdamW(
             trainable_params,
-            lr=self.hparams.learning_rate,
-            weight_decay=self.hparams.weight_decay,
+            lr=self.hparams.get("learning_rate"),  # type: ignore[attr-defined]
+            weight_decay=self.hparams.get("weight_decay"),  # type: ignore[attr-defined]
             betas=(0.9, 0.999),
         )
 
         # Cosine annealing LR scheduler
+        max_epochs = self.trainer.max_epochs if self.trainer else 100  # type: ignore[attr-defined]
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer,
-            T_max=self.trainer.max_epochs if self.trainer else 100,
+            T_max=max_epochs,
             eta_min=1e-6,
         )
 
@@ -498,12 +530,15 @@ class DINOv3Classifier(L.LightningModule):
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
+                "monitor": "val_mcc",
                 "interval": "epoch",
                 "frequency": 1,
             },
-        }
+        }  # type: ignore[return-value]
 
-    def predict_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> dict[str, torch.Tensor]:
+    def predict_step(
+        self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> dict[str, torch.Tensor]:
         """
         Prediction step (for inference)
 

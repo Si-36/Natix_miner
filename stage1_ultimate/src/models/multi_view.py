@@ -86,9 +86,7 @@ class MultiViewGenerator(nn.Module):
             f"grid_size={grid_size}, overlap={overlap:.1%} (with ROI caching)"
         )
 
-    def _compute_positions(
-        self, height: int, width: int
-    ) -> list[tuple[int, int, int, int]]:
+    def _compute_positions(self, height: int, width: int) -> list[tuple[int, int, int, int]]:
         """
         Compute crop positions for tiles with overlap
 
@@ -126,9 +124,7 @@ class MultiViewGenerator(nn.Module):
 
         return positions
 
-    def _get_cached_roi_boxes(
-        self, B: int, H: int, W: int, device: torch.device
-    ) -> Tensor:
+    def _get_cached_roi_boxes(self, B: int, H: int, W: int, device: torch.device) -> Tensor:
         """
         Get or create cached ROI boxes for roi_align (ELITE: zero overhead)
 
@@ -150,14 +146,14 @@ class MultiViewGenerator(nn.Module):
         # Check cache
         if cache_key in self._roi_cache:
             # Reuse cached boxes for single image, repeat for batch
-            single_boxes = self._roi_cache[cache_key]  # [num_tiles, 5]
+            cached_boxes = self._roi_cache[cache_key]  # [num_tiles, 5]
 
             # Repeat for batch and update batch indices
             # This is fast (vectorized) vs building boxes in Python loop
-            boxes = single_boxes.repeat(B, 1)  # [B*num_tiles, 5]
+            boxes = cached_boxes.repeat(B, 1)  # [B*num_tiles, 5]
 
             # Update batch indices: 0,0,0...1,1,1...2,2,2...
-            num_tiles = single_boxes.size(0)
+            num_tiles = cached_boxes.size(0)
             batch_indices = torch.arange(B, device=device).repeat_interleave(num_tiles)
             boxes[:, 0] = batch_indices
 
@@ -167,12 +163,13 @@ class MultiViewGenerator(nn.Module):
         positions = self._compute_positions(H, W)  # List of (x1, y1, x2, y2)
 
         # Build boxes for single image (batch_idx=0)
-        single_boxes = []
-        for (x1, y1, x2, y2) in positions:
-            single_boxes.append([0, x1, y1, x2, y2])  # batch_idx will be updated
+        box_list = []
+        for x1, y1, x2, y2 in positions:
+            box_list.append([0, x1, y1, x2, y2])  # batch_idx will be updated
 
+        # Convert to tensor
         single_boxes_tensor = torch.tensor(
-            single_boxes, dtype=torch.float32, device=device
+            box_list, dtype=torch.float32, device=device
         )  # [num_tiles, 5]
 
         # Cache it
@@ -285,7 +282,7 @@ class MultiViewGenerator(nn.Module):
                 dim=1,
             )  # [B, 5]
 
-            global_views = roi_align(
+            global_views = roi_align(  # type: ignore[misc]
                 images,
                 global_boxes,
                 output_size=(self.crop_size, self.crop_size),
@@ -294,11 +291,17 @@ class MultiViewGenerator(nn.Module):
             )  # [B, C, crop_size, crop_size]
 
             # 2. Tile views using content-aware ROI generation
-            tile_boxes = self._generate_content_aware_roi_boxes(
-                content_boxes, images.device
-            )
+            tile_boxes = self._generate_content_aware_roi_boxes(content_boxes, images.device)
 
-            tile_crops = roi_align(
+            tile_crops = roi_align(  # type: ignore[misc]
+                images,
+                tile_boxes,
+                output_size=(self.crop_size, self.crop_size),
+                spatial_scale=1.0,
+                aligned=True,
+            )  # [B*num_tiles, C, crop_size, crop_size]
+
+            tile_crops = roi_align(  # type: ignore[misc]
                 images,
                 tile_boxes,
                 output_size=(self.crop_size, self.crop_size),
@@ -330,7 +333,7 @@ class MultiViewGenerator(nn.Module):
             boxes_tensor = self._get_cached_roi_boxes(B, H, W, images.device)
 
             # Extract and resize all tiles in one batched operation!
-            tile_crops = roi_align(
+            tile_crops = roi_align(  # type: ignore[misc]
                 images,
                 boxes_tensor,
                 output_size=(self.crop_size, self.crop_size),
@@ -421,9 +424,7 @@ class TopKMeanAggregator(nn.Module):
         B, num_crops, num_classes = logits.shape
 
         if self.topk > num_crops:
-            logger.warning(
-                f"topk={self.topk} > num_crops={num_crops}, using all crops"
-            )
+            logger.warning(f"topk={self.topk} > num_crops={num_crops}, using all crops")
             actual_k = num_crops
         else:
             actual_k = self.topk
@@ -611,34 +612,34 @@ class MultiViewDINOv3(nn.Module):
         # Get crop_size from backbone config if not provided
         if crop_size is None:
             # Try to get from backbone config
-            if hasattr(backbone, "config") and hasattr(backbone.config, "image_size"):
-                crop_size = backbone.config.image_size
-            elif hasattr(backbone, "image_size"):
-                crop_size = backbone.image_size
+            if hasattr(backbone, "config") and hasattr(backbone.config, "image_size"):  # type: ignore[attr-defined]
+                crop_size = int(backbone.config.image_size)  # type: ignore[arg-type]
+            elif hasattr(backbone, "image_size"):  # type: ignore[attr-defined]
+                crop_size = int(backbone.image_size)  # type: ignore[arg-type]
             else:
                 # Default to 224 (DINOv3 standard)
                 crop_size = 224
-                logger.warning(
-                    "Could not infer crop_size from backbone, using default 224"
-                )
+                logger.warning("Could not infer crop_size from backbone, using default 224")
+        else:
+            crop_size = int(crop_size)  # type: ignore[arg-type]
 
         # Multi-view generator
         self.generator = MultiViewGenerator(
             crop_size=crop_size,
             grid_size=grid_size,
             overlap=overlap,
-        )
+        )  # type: ignore[arg-type]
 
         self.num_crops = num_crops
         self.crop_size = crop_size
 
         # Validate num_crops matches generator
-        if self.num_crops != self.generator.num_crops:
+        if self.num_crops != self.generator.num_crops:  # type: ignore[attr-defined]
             logger.warning(
-                f"num_crops={num_crops} != generator.num_crops={self.generator.num_crops}, "
-                f"using generator.num_crops={self.generator.num_crops}"
+                f"num_crops={num_crops} != generator.num_crops={self.generator.num_crops}, "  # type: ignore[attr-defined]
+                f"using generator.num_crops={self.generator.num_crops}"  # type: ignore[attr-defined]
             )
-            self.num_crops = self.generator.num_crops
+            self.num_crops = self.generator.num_crops  # type: ignore[attr-defined]
 
         logger.info(
             f"Initialized MultiViewDINOv3: num_crops={self.num_crops}, "
@@ -665,7 +666,9 @@ class MultiViewDINOv3(nn.Module):
         B, C = images.size(0), images.size(1)
 
         # Step 1: Generate crops for all images (pass content_boxes through)
-        all_crops = self.generator(images, content_boxes=content_boxes)  # [B, num_crops, C, crop_size, crop_size]
+        all_crops = self.generator(  # type: ignore[call-arg]
+            images, content_boxes=content_boxes
+        )  # [B, num_crops, C, crop_size, crop_size]
 
         # Step 2: Flatten for batched processing (CRITICAL for speed!)
         crops_flat = all_crops.view(
@@ -673,8 +676,8 @@ class MultiViewDINOv3(nn.Module):
         )  # [B*num_crops, C, crop_size, crop_size]
 
         # Step 3: Single batched forward pass through backbone + head
-        features = self.backbone(crops_flat)  # [B*num_crops, hidden_size]
-        logits = self.head(features)  # [B*num_crops, num_classes]
+        features = self.backbone(crops_flat)  # type: ignore[operator]
+        logits = self.head(features)  # type: ignore[operator]
 
         # Step 4: Reshape to [B, num_crops, num_classes]
         num_classes = logits.size(-1)
@@ -682,6 +685,7 @@ class MultiViewDINOv3(nn.Module):
 
         # Step 5: Aggregate logits (returns logits, not probabilities!)
         aggregated_logits = self.aggregator(logits)  # [B, num_classes]
+        assert isinstance(aggregated_logits, torch.Tensor)  # type guard
 
         return aggregated_logits
 
@@ -726,21 +730,21 @@ def create_multiview_model(
         >>> model = create_multiview_model(backbone, head, aggregation="topk_mean", topk=2)
     """
     # Create aggregator based on strategy
+    agg_module: nn.Module
     if aggregation == "topk_mean":
-        aggregator = TopKMeanAggregator(topk=topk)
+        agg_module = TopKMeanAggregator(topk=topk)
     elif aggregation == "attention":
-        aggregator = AttentionAggregator(num_classes=num_classes)
+        agg_module = AttentionAggregator(num_classes=num_classes)
     else:
         raise ValueError(
-            f"Unknown aggregation strategy: {aggregation}. "
-            f"Valid options: 'topk_mean', 'attention'"
+            f"Unknown aggregation strategy: {aggregation}. Valid options: 'topk_mean', 'attention'"
         )
 
     # Create multi-view model
     model = MultiViewDINOv3(
         backbone=backbone,
         head=head,
-        aggregator=aggregator,
+        aggregator=agg_module,
         grid_size=grid_size,
         overlap=overlap,
         crop_size=crop_size,  # Now configurable from backbone
@@ -786,11 +790,11 @@ if __name__ == "__main__":
     print("=" * 80)
     print("Test 3: AttentionAggregator")
     print("=" * 80)
-    aggregator = AttentionAggregator(num_classes=13, hidden_dim=64)
-    print(f"{aggregator}\n")
+    aggregator_test: nn.Module = AttentionAggregator(num_classes=13, hidden_dim=64)
+    print(f"{aggregator_test}\n")
 
     predictions = torch.randn(2, 10, 13)
-    aggregated = aggregator(predictions)
+    aggregated = aggregator_test(predictions)
     print(f"Input: {predictions.shape} → Output: {aggregated.shape}")
     assert aggregated.shape == (2, 13), f"Expected [2, 13], got {aggregated.shape}"
     print("✅ AttentionAggregator test passed\n")

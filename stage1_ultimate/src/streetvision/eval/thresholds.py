@@ -18,13 +18,18 @@ import torch
 from .metrics import compute_mcc, _to_numpy
 
 # Import matplotlib only when needed (optional dependency)
+_plt_module: Optional[object] = None
+HAS_MATPLOTLIB = False
+
 try:
     import matplotlib.pyplot as plt
+    from matplotlib.figure import Figure
 
     HAS_MATPLOTLIB = True
+    _plt_module = plt
 except ImportError:
     HAS_MATPLOTLIB = False
-    plt = None
+    _plt_module = None
 
 
 def select_threshold_max_mcc(
@@ -57,25 +62,25 @@ def select_threshold_max_mcc(
         Best threshold: 0.520, MCC: 0.856
     """
     # Convert to numpy
-    logits = _to_numpy(logits)
-    labels = _to_numpy(labels)
+    logits_np = _to_numpy(logits)
+    labels_np = _to_numpy(labels)
 
     # Get probabilities for positive class
-    if len(logits.shape) == 2 and logits.shape[1] == 2:
+    if len(logits_np.shape) == 2 and logits_np.shape[1] == 2:
         # Two-class logits: apply softmax and take prob of class 1
-        probs = torch.softmax(torch.tensor(logits), dim=1)[:, 1].numpy()
-    elif len(logits.shape) == 2 and logits.shape[1] == 1:
+        probs = torch.softmax(torch.from_numpy(logits_np), dim=1)[:, 1].numpy()
+    elif len(logits_np.shape) == 2 and logits_np.shape[1] == 1:
         # Single output: apply sigmoid
-        probs = torch.sigmoid(torch.tensor(logits[:, 0])).numpy()
-    elif len(logits.shape) == 1:
+        probs = torch.sigmoid(torch.from_numpy(logits_np[:, 0])).numpy()
+    elif len(logits_np.shape) == 1:
         # Already probabilities or single output
-        if logits.max() > 1.0 or logits.min() < 0.0:
+        if logits_np.max() > 1.0 or logits_np.min() < 0.0:
             # Apply sigmoid if not in [0, 1]
-            probs = torch.sigmoid(torch.tensor(logits)).numpy()
+            probs = torch.sigmoid(torch.from_numpy(logits_np)).numpy()
         else:
-            probs = logits
+            probs = logits_np
     else:
-        raise ValueError(f"Unexpected logits shape: {logits.shape}")
+        raise ValueError(f"Unexpected logits shape: {logits_np.shape}")
 
     # Sweep thresholds
     thresholds = np.linspace(0.0, 1.0, n_thresholds)
@@ -84,7 +89,7 @@ def select_threshold_max_mcc(
 
     for threshold in thresholds:
         y_pred = (probs >= threshold).astype(int)
-        mcc = compute_mcc(labels, y_pred)
+        mcc = compute_mcc(labels_np, y_pred)
 
         if mcc > best_mcc:
             best_mcc = mcc
@@ -124,21 +129,21 @@ def sweep_thresholds_binary(
         >>> plt.savefig("threshold_curve.png")
     """
     # Convert to numpy
-    logits = _to_numpy(logits)
-    labels = _to_numpy(labels)
+    logits_np = _to_numpy(logits)
+    labels_np = _to_numpy(labels)
 
     # Get probabilities
-    if len(logits.shape) == 2 and logits.shape[1] == 2:
-        probs = torch.softmax(torch.tensor(logits), dim=1)[:, 1].numpy()
-    elif len(logits.shape) == 2 and logits.shape[1] == 1:
-        probs = torch.sigmoid(torch.tensor(logits[:, 0])).numpy()
-    elif len(logits.shape) == 1:
-        if logits.max() > 1.0 or logits.min() < 0.0:
-            probs = torch.sigmoid(torch.tensor(logits)).numpy()
+    if len(logits_np.shape) == 2 and logits_np.shape[1] == 2:
+        probs = torch.softmax(torch.from_numpy(logits_np), dim=1)[:, 1].numpy()
+    elif len(logits_np.shape) == 2 and logits_np.shape[1] == 1:
+        probs = torch.sigmoid(torch.from_numpy(logits_np[:, 0])).numpy()
+    elif len(logits_np.shape) == 1:
+        if logits_np.max() > 1.0 or logits_np.min() < 0.0:
+            probs = torch.sigmoid(torch.from_numpy(logits_np)).numpy()
         else:
-            probs = logits
+            probs = logits_np
     else:
-        raise ValueError(f"Unexpected logits shape: {logits.shape}")
+        raise ValueError(f"Unexpected logits shape: {logits_np.shape}")
 
     # Sweep thresholds
     thresholds = np.linspace(0.0, 1.0, n_thresholds)
@@ -177,8 +182,7 @@ def plot_threshold_curve(
     """
     if not HAS_MATPLOTLIB:
         raise ImportError(
-            "matplotlib is required for plotting. "
-            "Install with: pip install matplotlib"
+            "matplotlib is required for plotting. Install with: pip install matplotlib"
         )
 
     thresholds, mcc_scores = sweep_thresholds_binary(logits, labels, n_thresholds)
@@ -189,25 +193,26 @@ def plot_threshold_curve(
     best_mcc = mcc_scores[best_idx]
 
     # Create plot
-    plt.figure(figsize=(10, 6))
-    plt.plot(thresholds, mcc_scores, linewidth=2, label="MCC")
-    plt.axvline(
-        best_threshold,
-        color="red",
-        linestyle="--",
-        label=f"Best: {best_threshold:.3f} (MCC={best_mcc:.3f})",
-    )
-    plt.xlabel("Threshold", fontsize=12)
-    plt.ylabel("MCC", fontsize=12)
-    plt.title("Threshold Selection: Maximize MCC", fontsize=14)
-    plt.legend(fontsize=10)
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
+    if HAS_MATPLOTLIB and _plt_module is not None:
+        _plt_module.figure(figsize=(10, 6))  # type: ignore[attr-defined]
+        _plt_module.plot(thresholds, mcc_scores, linewidth=2, label="MCC")  # type: ignore[attr-defined]
+        _plt_module.axvline(  # type: ignore[attr-defined]
+            best_threshold,
+            color="red",
+            linestyle="--",
+            label=f"Best: {best_threshold:.3f} (MCC={best_mcc:.3f})",
+        )
+        _plt_module.xlabel("Threshold", fontsize=12)  # type: ignore[attr-defined]
+        _plt_module.ylabel("MCC", fontsize=12)  # type: ignore[attr-defined]
+        _plt_module.title("Threshold Selection: Maximize MCC", fontsize=14)  # type: ignore[attr-defined]
+        _plt_module.legend(fontsize=10)  # type: ignore[attr-defined]
+        _plt_module.grid(True, alpha=0.3)  # type: ignore[attr-defined]
+        _plt_module.tight_layout()  # type: ignore[attr-defined]
 
-    if save_path:
-        plt.savefig(save_path, dpi=150)
-        print(f"Saved threshold curve to {save_path}")
-    else:
-        plt.show()
+        if save_path:
+            _plt_module.savefig(save_path, dpi=150)  # type: ignore[attr-defined]
+            print(f"Saved threshold curve to {save_path}")
+        else:
+            _plt_module.show()  # type: ignore[attr-defined]
 
-    plt.close()
+        _plt_module.close()  # type: ignore[attr-defined]
