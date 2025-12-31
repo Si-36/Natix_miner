@@ -1,6 +1,7 @@
-"""PEFT (Parameter-Efficient Fine-Tuning) modules"""
+"""PEFT (Parameter-Efficient Fine-Tuning) modules for ExPLoRA"""
 
-from peft.explora_domain import (
+# Use relative imports to avoid conflict with HuggingFace peft library
+from .explora_domain import (
     SimCLRLoss,
     create_projection_head,
     create_explora_config,
