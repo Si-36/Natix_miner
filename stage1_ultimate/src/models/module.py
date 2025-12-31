@@ -38,6 +38,46 @@ from models.multi_view import (
 logger = logging.getLogger(__name__)
 
 
+class FocalLoss(nn.Module):
+    """
+    Focal Loss for imbalanced classification (2025 Best Practice)
+    
+    From: "Focal Loss for Dense Object Detection" (Lin et al., 2017)
+    Reweights easy/hard examples to focus on hard negatives.
+    
+    Use for datasets with >2:1 class imbalance.
+    
+    Args:
+        alpha: Weighting factor for rare class (default: 0.25)
+        gamma: Focusing parameter (default: 2.0)
+    
+    Example:
+        >>> loss_fn = FocalLoss(alpha=0.25, gamma=2.0)
+        >>> loss = loss_fn(logits, labels)
+    """
+    
+    def __init__(self, alpha: float = 0.25, gamma: float = 2.0):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+    
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """
+        Compute focal loss.
+        
+        Args:
+            inputs: [N, C] logits
+            targets: [N] class indices
+        
+        Returns:
+            Scalar focal loss
+        """
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none')
+        pt = torch.exp(-ce_loss)  # Probability of true class
+        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+        return focal_loss.mean()
+
+
 class EMA:
     """
     Exponential Moving Average for model weights
@@ -187,6 +227,10 @@ class DINOv3Classifier(L.LightningModule):
         dropout_rate: float = 0.3,
         learning_rate: float = 1e-4,
         weight_decay: float = 0.01,
+        loss_name: str = "cross_entropy",  # 2025: Configurable loss
+        focal_alpha: float = 0.25,  # For focal loss
+        focal_gamma: float = 2.0,  # For focal loss
+        class_weights: Optional[torch.Tensor] = None,  # For weighted CE
         use_ema: bool = True,
         ema_decay: float = 0.9999,
         use_multiview: bool = False,
@@ -222,8 +266,18 @@ class DINOv3Classifier(L.LightningModule):
             }
         )
 
-        # Loss function
-        self.criterion = nn.CrossEntropyLoss()
+        # Loss function (2025: Configurable - FocalLoss, WeightedCE, or CrossEntropy)
+        if loss_name == "focal":
+            self.criterion = FocalLoss(alpha=focal_alpha, gamma=focal_gamma)
+            logger.info(f"Using FocalLoss (alpha={focal_alpha}, gamma={focal_gamma})")
+        elif loss_name == "weighted_ce":
+            if class_weights is None:
+                raise ValueError("class_weights must be provided for weighted_ce loss")
+            self.criterion = nn.CrossEntropyLoss(weight=class_weights)
+            logger.info(f"Using WeightedCrossEntropyLoss (weights={class_weights})")
+        else:
+            self.criterion = nn.CrossEntropyLoss()
+            logger.info("Using CrossEntropyLoss")
 
         # Metrics
         self.train_metrics = MetricCollection(
@@ -495,11 +549,11 @@ class DINOv3Classifier(L.LightningModule):
 
     def configure_optimizers(self) -> dict[str, Any]:
         """
-        Configure optimizer and LR scheduler
+        Configure optimizer and LR scheduler (2025: Cosine with Linear Warmup)
 
         Uses:
         - AdamW optimizer (best for vision transformers)
-        - Cosine annealing LR scheduler
+        - Cosine annealing LR scheduler with linear warmup (2025 best practice)
 
         Returns:
             Dictionary with optimizer and scheduler config
@@ -518,19 +572,39 @@ class DINOv3Classifier(L.LightningModule):
             betas=(0.9, 0.999),
         )
 
-        # Cosine annealing LR scheduler
+        # 2025: Cosine annealing with linear warmup
         max_epochs = self.trainer.max_epochs if self.trainer else 100  # type: ignore[attr-defined]
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        warmup_epochs = int(max_epochs * 0.1)  # 10% warmup (2025 best practice)
+        min_lr = 1e-6
+        
+        from torch.optim.lr_scheduler import CosineAnnealingLR, SequentialLR, LinearLR
+        
+        # Linear warmup scheduler
+        warmup_scheduler = LinearLR(
             optimizer,
-            T_max=max_epochs,
-            eta_min=1e-6,
+            start_factor=0.01,  # Start at 1% of max LR
+            end_factor=1.0,
+            total_iters=warmup_epochs,
+        )
+        
+        # Cosine annealing scheduler
+        cosine_scheduler = CosineAnnealingLR(
+            optimizer,
+            T_max=max_epochs - warmup_epochs,
+            eta_min=min_lr,
+        )
+        
+        # Sequential scheduler (warmup → cosine)
+        scheduler = SequentialLR(
+            optimizer,
+            schedulers=[warmup_scheduler, cosine_scheduler],
+            milestones=[warmup_epochs],
         )
 
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "monitor": "val_mcc",
                 "interval": "epoch",
                 "frequency": 1,
             },
@@ -597,6 +671,47 @@ class DINOv3Classifier(L.LightningModule):
             f"  trainable_params={self.num_trainable_parameters:,}\n"
             f")"
         )
+
+
+def create_model_with_compile(
+    model: DINOv3Classifier,
+    compile_enabled: bool = False,
+    compile_mode: str = "reduce-overhead",
+    compiler_stance: Optional[str] = None,
+) -> DINOv3Classifier:
+    """
+    Create model with optional torch.compile (2025 optimization)
+    
+    torch.compile gives 1.5-2× speedup with no code changes!
+    
+    Args:
+        model: DINOv3Classifier instance
+        compile_enabled: If True, compile model
+        compile_mode: Compile mode ("reduce-overhead", "max-autotune", "default")
+        compiler_stance: PyTorch 2.6+ compiler stance ("performance", "accuracy", "debug")
+    
+    Returns:
+        Compiled model (if enabled) or original model
+    
+    Example:
+        >>> model = DINOv3Classifier(...)
+        >>> model = create_model_with_compile(model, compile_enabled=True)
+    """
+    if compile_enabled:
+        # Set compiler stance (PyTorch 2.6+)
+        if compiler_stance is not None:
+            try:
+                import torch.compiler
+                torch.compiler.set_stance(compiler_stance)
+                logger.info(f"Set compiler stance: {compiler_stance}")
+            except AttributeError:
+                logger.warning("torch.compiler.set_stance not available (requires PyTorch 2.6+)")
+        
+        logger.info(f"🔥 Compiling model with torch.compile (mode={compile_mode})...")
+        model = torch.compile(model, mode=compile_mode, fullgraph=True, dynamic=False)
+        logger.info(f"   ✓ Model compiled successfully")
+    
+    return model
 
 
 if __name__ == "__main__":

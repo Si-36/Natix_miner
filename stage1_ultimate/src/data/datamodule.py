@@ -91,12 +91,31 @@ class NATIXDataModule(L.LightningDataModule):
         self.eval_canvas_size = eval_canvas_size
 
         # Create transforms (split-specific)
+        # 2025: Use configurable augmentation if available, else fallback to DINOv3 defaults
+        self.use_config_transforms = False  # Will be set if config provided
         self.train_transform = get_dinov3_transforms(train=True)
         self.eval_transform = get_dinov3_transforms(
             train=False,
             eval_mode=eval_mode,
             eval_canvas_size=eval_canvas_size,
         )
+    
+    def set_transforms_from_config(self, cfg) -> None:
+        """
+        2025: Set transforms from config (TrivialAugmentWide v2, AugMix, etc.)
+        
+        Args:
+            cfg: Hydra config (config.data.augmentation)
+        """
+        try:
+            from data.augmentation import get_train_transforms, get_val_transforms
+            self.train_transform = get_train_transforms(cfg)
+            self.eval_transform = get_val_transforms(cfg)
+            self.use_config_transforms = True
+            logger.info("✅ Using configurable augmentation transforms (2025)")
+        except Exception as e:
+            logger.warning(f"Failed to load config transforms, using defaults: {e}")
+            self.use_config_transforms = False
 
         # Datasets (created in setup())
         self.train_dataset: Optional[NATIXDataset] = None

@@ -13,8 +13,9 @@
 
 defaults:
   - model: dinov3_vith16  # FIXED: DINOv3 ViT-H/16 (was dinov2_vits)
-  - training: baseline  # Default training config
+  - training: optimization  # 2025: Training optimizations (BF16, compile, focal loss)
   - data: natix        # Default dataset
+  - phase2: mcc        # Phase 2 MCC optimization config
   - calibration: temperature  # Default calibration method
   - evaluation: default  # Default evaluation config
   - _self_  # Include this config last (for overrides)

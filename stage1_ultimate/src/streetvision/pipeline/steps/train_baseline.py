@@ -97,7 +97,35 @@ def run_phase1_baseline(
     learning_rate = cfg.training.optimizer.lr
     weight_decay = cfg.training.optimizer.weight_decay
     num_gpus = cfg.hardware.num_gpus
-    precision = "16-mixed" if cfg.training.mixed_precision.enabled else "32"
+    
+    # 2025: Auto-detect BF16 support (A100/H100) or fallback to FP32
+    if cfg.training.mixed_precision.get("enabled", False):
+        if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8:
+            # Ampere+ GPU (A100, H100) supports BF16
+            precision = "bf16-mixed"
+            logger.info("✅ Using BF16 mixed precision (GPU supports it)")
+        else:
+            # Older GPU or CPU - use FP32
+            precision = "32"
+            logger.warning("BF16 requested but GPU doesn't support it, using FP32")
+    else:
+        precision = "32"
+    
+    # 2025: Gradient accumulation
+    gradient_accumulation_steps = cfg.training.get("gradient_accumulation_steps", 1)
+    
+    # 2025: torch.compile settings
+    compile_enabled = cfg.hardware.get("compile", False)
+    compile_mode = cfg.hardware.get("compile_mode", "reduce-overhead")
+    compiler_stance = cfg.hardware.get("compiler", {}).get("stance", None)
+    
+    # 2025: Loss function config
+    loss_name = cfg.training.loss.get("name", "cross_entropy")
+    focal_alpha = cfg.training.loss.get("focal_alpha", 0.25)
+    focal_gamma = cfg.training.loss.get("focal_gamma", 2.0)
+    class_weights = cfg.training.loss.get("class_weights", None)
+    if class_weights is not None:
+        class_weights = torch.tensor(class_weights, dtype=torch.float32)
 
     # Early stopping config
     monitor_metric = cfg.training.early_stopping.monitor  # "val_select/acc"
@@ -130,12 +158,37 @@ def run_phase1_baseline(
         dropout_rate=cfg.model.dropout_rate,
         learning_rate=learning_rate,
         weight_decay=weight_decay,
+        loss_name=loss_name,  # 2025: Configurable loss
+        focal_alpha=focal_alpha,
+        focal_gamma=focal_gamma,
+        class_weights=class_weights,
         use_ema=cfg.model.use_ema,
         ema_decay=cfg.checkpointing.ema_decay,
         use_multiview=cfg.model.use_multiview,
         multiview_aggregation=cfg.model.multiview_aggregation,
         multiview_topk=cfg.model.multiview_topk,
     )
+    
+    # 2025: Apply torch.compile if enabled (BEFORE moving to device)
+    if compile_enabled:
+        # Set compiler stance (PyTorch 2.6+)
+        if compiler_stance is not None:
+            try:
+                import torch.compiler
+                torch.compiler.set_stance(compiler_stance)
+                logger.info(f"✅ Set compiler stance: {compiler_stance}")
+            except AttributeError:
+                logger.warning("torch.compiler.set_stance not available (requires PyTorch 2.6+)")
+        
+        logger.info(f"🔥 Compiling model with torch.compile (mode={compile_mode})...")
+        from models.module import create_model_with_compile
+        model = create_model_with_compile(
+            model=model,
+            compile_enabled=True,
+            compile_mode=compile_mode,
+            compiler_stance=compiler_stance,
+        )
+        logger.info("✅ Model compiled successfully")
 
     # CRITICAL: Load ExPLoRA checkpoint if requested
     if cfg.model.init_from_explora and artifacts.explora_checkpoint.exists():
@@ -172,20 +225,24 @@ def run_phase1_baseline(
         ),
     ]
 
-    # Trainer (config-driven)
+    # Trainer (config-driven, 2025 optimizations)
     # Lightning expects devices>=1. For CPU runs we use devices=1.
     accelerator = "cpu" if num_gpus == 0 else "gpu"
-    devices = 1 if num_gpus == 0 else num_gpus
+    devices = "auto" if num_gpus == 0 else num_gpus  # 2025: Use "auto" for CPU
+    
     trainer = L.Trainer(
         max_epochs=max_epochs,
         accelerator=accelerator,
         devices=devices,
         precision=precision,
+        accumulate_grad_batches=gradient_accumulation_steps,  # 2025: Gradient accumulation
         callbacks=callbacks,
         default_root_dir=str(artifacts.phase1_dir),
         log_every_n_steps=10,
         deterministic=True,
     )
+    
+    logger.info(f"Effective batch size: {batch_size} × {gradient_accumulation_steps} × {num_gpus} = {batch_size * gradient_accumulation_steps * max(num_gpus, 1)}")
 
     # Train
     logger.info("Starting training...")

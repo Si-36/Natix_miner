@@ -1,0 +1,49 @@
+# Training Optimization Configuration (2025 Best Practices)
+# ==============================================================================
+# 
+# This config enables all 2025 training optimizations:
+# - BF16 mixed precision (2× speedup, no accuracy loss)
+# - torch.compile (1.5-2× speedup)
+# - Gradient accumulation (larger effective batch size)
+# - Configurable loss (FocalLoss, WeightedCE, CrossEntropy)
+# - Cosine warmup scheduler
+
+# Mixed Precision (BF16 recommended for A100/H100, FP32 fallback for older GPUs)
+mixed_precision:
+  enabled: true
+  dtype: bfloat16  # NOT float16 (causes NaN with DINOv3)
+  # Auto-detected: Uses BF16 if GPU supports it, FP32 otherwise
+
+# PyTorch 2.6 Compile (2025 optimization)
+hardware:
+  compile: false  # Set true to enable (requires PyTorch 2.6+)
+  compile_mode: "reduce-overhead"  # Options: "reduce-overhead", "max-autotune", "default"
+  compiler:
+    stance: "performance"  # PyTorch 2.6+ compiler stance: "performance", "accuracy", "debug"
+
+# Gradient Accumulation (for larger effective batch size)
+gradient_accumulation_steps: 1  # Effective batch = batch_size × gradient_accumulation_steps × num_gpus
+
+# Loss Function Configuration
+loss:
+  name: "cross_entropy"  # Options: "cross_entropy", "focal", "weighted_ce"
+  # Focal Loss parameters (if name="focal")
+  focal_alpha: 0.25  # Weighting factor for rare class
+  focal_gamma: 2.0   # Focusing parameter
+  # Weighted CE parameters (if name="weighted_ce")
+  class_weights: null  # [weight_class_0, weight_class_1] or null for equal weights
+
+# Optimizer Configuration
+optimizer:
+  name: "adamw"
+  lr: 3e-4  # Increased from 1e-4 (head-only training can handle higher LR)
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+  eps: 1e-8
+
+# Scheduler Configuration (Cosine with Linear Warmup)
+scheduler:
+  name: "cosine_warmup"
+  warmup_ratio: 0.1  # 10% of epochs for warmup
+  min_lr: 1e-6  # Minimum learning rate
+
