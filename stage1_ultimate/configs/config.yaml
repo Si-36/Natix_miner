@@ -25,16 +25,62 @@ experiment_name: stage1_ultimate
 output_dir: ${hydra:runtime.output_dir}  # Use Hydra's runtime dir - prevents path confusion!
 
 # Pipeline configuration
-pipeline:
+  pipeline:
   # Which phases to run
   phases:
     - phase1  # Baseline training
+    - phase4_explora  # ExPLoRA domain adaptation (alias: phase4a)
     - phase2  # Threshold sweep
     - phase6  # Bundle export
 
   # Auto-save pipeline state
   save_state: true
   state_path: ${output_dir}/pipeline_state.json
+
+# Phase 4a: ExPLoRA configuration
+phase4a_explora:
+  name: "ExPLoRA SimCLR Domain Adaptation"
+  # Training configuration
+  training:
+    num_epochs: 30
+    lr: 1e-4
+    weight_decay: 0.05
+    batch_size: 32
+    gradient_accumulation_steps: 8
+    warmup_epochs: 3
+  
+  # SimCLR settings
+  simclr:
+    temperature: 0.1
+    projection_dim: 128
+    hidden_dim: 2048
+    dropout: 0.1
+  
+  # ExPLoRA settings
+  explora:
+    r: 32
+    lora_alpha: 64
+    target_modules:
+      - "q_proj"
+      - "v_proj"
+    lora_dropout: 0.05
+    unfrozen_blocks: [23]
+    use_dora: false
+  
+  # Augmentation settings
+  augmentation:
+    crop_scale: [0.2, 1.0]
+    color_jitter_strength: 0.8
+    gaussian_blur: true
+    blur_kernel_size: 23
+    blur_sigma: [0.1, 2.0]
+    grayscale_prob: 0.2
+  
+  # Hardware settings
+  hardware:
+    num_gpus: 2
+    mixed_precision: true
+    compile: false
 
   # Validation
   validate_inputs: true
