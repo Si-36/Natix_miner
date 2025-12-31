@@ -50,7 +50,10 @@ class SimCLRLoss(nn.Module):
     
     def forward(self, z_i: torch.Tensor, z_j: torch.Tensor) -> torch.Tensor:
         """
-        Compute NT-Xent contrastive loss.
+        Compute NT-Xent contrastive loss (CORRECTED 2025).
+        
+        CRITICAL FIX: Loss must be computed for EACH sample by extracting
+        its positive pair and comparing against all negatives (not just diagonal).
         
         Args:
             z_i: [batch_size, proj_dim] - embeddings from view 1
@@ -59,35 +62,46 @@ class SimCLRLoss(nn.Module):
         Returns:
             Scalar contrastive loss
         """
-        batch_size = z_i.shape[0]
+        B = z_i.shape[0]
         
         # L2 normalize embeddings
         z_i = F.normalize(z_i, dim=1)  # [B, D]
         z_j = F.normalize(z_j, dim=1)  # [B, D]
         
         # Concatenate both views: [2*B, D]
-        representations = torch.cat([z_i, z_j], dim=0)
+        z = torch.cat([z_i, z_j], dim=0)
         
-        # Compute similarity matrix: [2*B, 2*B]
-        similarity_matrix = torch.mm(representations, representations.T) / self.temperature
+        # Similarity matrix: [2*B, 2*B]
+        sim_matrix = torch.mm(z, z.T) / self.temperature
         
-        # Mask out self-similarities (diagonal)
-        mask = torch.eye(2 * batch_size, device=similarity_matrix.device, dtype=torch.bool)
-        similarity_matrix = similarity_matrix.masked_fill(mask, float('-inf'))
+        # Create positive pairs mask
+        # For sample i in [0, B], positive is at position i+B
+        # For sample i in [B, 2B], positive is at position i-B
+        pos_mask = torch.zeros((2*B, 2*B), dtype=torch.bool, device=z.device)
+        pos_mask[range(B), range(B, 2*B)] = True  # First half: (i, i+B)
+        pos_mask[range(B, 2*B), range(B)] = True  # Second half: (i+B, i)
         
-        # Positive pairs: diagonals at ±batch_size offset
-        # (i, i+B) and (i+B, i) are positive pairs
-        sim_ij = torch.diag(similarity_matrix, batch_size)   # z_i vs z_j
-        sim_ji = torch.diag(similarity_matrix, -batch_size)  # z_j vs z_i
-        positives = torch.cat([sim_ij, sim_ji], dim=0)  # [2*B]
+        # Mask out self-similarities (diagonal) and positives (for negatives)
+        # Negative mask = all except (positives AND self-similarities)
+        eye_mask = torch.eye(2*B, dtype=torch.bool, device=z.device)
+        neg_mask = ~pos_mask & ~eye_mask
         
-        # Compute NT-Xent loss (vectorized)
-        nominator = torch.exp(positives)
-        denominator = torch.exp(similarity_matrix).sum(dim=1)  # Sum over all negatives
+        # Compute NT-Xent loss for each sample (vectorized)
+        # Get positive similarities for each sample
+        pos_sim = sim_matrix[pos_mask].view(2*B, 1)  # [2B, 1]
         
-        loss = -torch.log(nominator / denominator).mean()
+        # Get all similarities for denominator (mask out self-similarities)
+        sim_matrix_masked = sim_matrix.clone()
+        sim_matrix_masked[eye_mask] = float('-inf')
         
-        return loss
+        # Use logsumexp for numerical stability
+        log_denominator = torch.logsumexp(sim_matrix_masked, dim=1, keepdim=True)  # [2B, 1]
+        
+        # NT-Xent loss: -log(exp(pos) / sum(exp(all_negatives)))
+        # Note: logsumexp already includes positive in denominator
+        loss = -pos_sim + log_denominator
+        
+        return loss.mean()
 
 
 def create_projection_head(
