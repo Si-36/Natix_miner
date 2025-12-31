@@ -21,8 +21,8 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-# Import from HuggingFace peft library (not our local peft module)
-from peft import LoraConfig, get_peft_model, TaskType  # type: ignore
+# Import from HuggingFace peft library
+from peft import LoraConfig, get_peft_model, TaskType
 
 logger = logging.getLogger(__name__)
 

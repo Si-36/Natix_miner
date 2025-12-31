@@ -27,10 +27,7 @@ import lightning as L
 import torchvision.transforms.v2 as v2
 from omegaconf import DictConfig
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from peft.explora_domain import SimCLRLoss, create_projection_head
+from explora_peft.domain import SimCLRLoss, create_projection_head
 from models.backbone import create_dinov3_backbone
 
 logger = logging.getLogger(__name__)
@@ -76,7 +73,7 @@ class ExPLoRAModule(L.LightningModule):
             self.backbone = backbone
         
         # Apply ExPLoRA configuration (LoRA + unfrozen blocks)
-        from peft.explora_domain import (
+        from explora_peft.domain import (
             create_explora_config,
             apply_explora_to_backbone,
         )
