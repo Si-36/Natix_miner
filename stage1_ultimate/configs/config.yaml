@@ -26,11 +26,11 @@ output_dir: ${hydra:runtime.output_dir}  # Use Hydra's runtime dir - prevents pa
 
 # Pipeline configuration
   pipeline:
-  # Which phases to run
-  phases:
-    - phase1  # Baseline training
-    - phase4_explora  # ExPLoRA domain adaptation (alias: phase4a)
-    - phase2  # Threshold sweep
+    # Which phases to run
+    phases:
+      - phase1  # Baseline training
+      - phase4_explora  # ExPLoRA domain adaptation (SimCLR)
+      - phase2  # Threshold sweep
     - phase6  # Bundle export
 
   # Auto-save pipeline state
