@@ -31,7 +31,7 @@ from typing import Dict, Optional, Tuple, Any
 from dataclasses import dataclass
 
 # Import sub-components
-from .backbone.dinov3_h16_plus import DINOv3Backbone
+from .backbone.dinov3_h16_plus_fixed import DINOv3H16Plus as DINOv3Backbone
 from .views.multi_view_extractor import MultiViewExtractor12
 from .attention.token_pruning import TokenPruningModule
 from .attention.qwen3_moe_layer import Qwen3MoEStack
