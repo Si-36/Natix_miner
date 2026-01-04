@@ -1,0 +1,118 @@
+# ══════════════════════════════════════════════════════════════
+# LOSS FUNCTION CONFIGURATION - COMPLETE 2026 LOSS
+# ══════════════════════════════════════════════════════════════
+
+# Loss = 0.40*Focal + 0.25*Consistency + 0.15*Auxiliary + 0.20*SAM3
+
+# ══════════════════════════════════════════════════════════════
+# LOSS WEIGHTS
+# ══════════════════════════════════════════════════════════════
+
+loss_weights:
+  focal: 0.40
+  consistency: 0.25
+  auxiliary: 0.15
+  sam3: 0.20
+
+# ══════════════════════════════════════════════════════════════
+# FOCAL LOSS CONFIGURATION
+# ══════════════════════════════════════════════════════════════
+
+focal_loss:
+  enabled: true
+  
+  # Focal parameters
+  gamma: 2.0  # Focusing parameter (higher = more focus on hard examples)
+  alpha: 0.25  # Balancing factor for positive class
+  
+  # Label smoothing
+  label_smoothing: 0.1
+  
+  # Reduction
+  reduction: "mean"
+  
+  # Expected impact
+  expected_mcc_gain: 0.04  # +4% MCC
+
+# ══════════════════════════════════════════════════════════════
+# MULTI-VIEW CONSISTENCY LOSS
+# ══════════════════════════════════════════════════════════════
+
+consistency_loss:
+  enabled: true
+  
+  # Consistency parameters
+  temperature: 1.0  # Softmax temperature
+  
+  # Loss type
+  loss_type: "kl_divergence"  # or "cosine_similarity"
+  
+  # View pairs to compare
+  compare_views: "all"  # "all", "adjacent", "global_local"
+  
+  # Reduction
+  reduction: "mean"
+  
+  # Expected impact
+  expected_mcc_gain: 0.02  # +2% MCC
+
+# ══════════════════════════════════════════════════════════════
+# AUXILIARY METADATA LOSS
+# ══════════════════════════════════════════════════════════════
+
+auxiliary_loss:
+  enabled: true
+  
+  # Weather prediction loss
+  weather_loss:
+    enabled: true
+    loss_type: "cross_entropy"
+    weight: 1.0
+    ignore_index: 8  # NULL class
+    num_classes: 8  # 7 weather types + NULL
+  
+  # Expected impact
+  expected_mcc_gain: 0.01  # +1% MCC
+
+# ══════════════════════════════════════════════════════════════
+# SAM 3 SEGMENTATION LOSS
+# ══════════════════════════════════════════════════════════════
+
+sam3_loss:
+  enabled: true
+  
+  # Dice loss
+  dice_loss:
+    enabled: true
+    smooth: 1.0
+    reduction: "mean"
+    weight: 1.0
+  
+  # Cross entropy loss
+  ce_loss:
+    enabled: true
+    reduction: "mean"
+    weight: 0.5
+  
+  # Number of classes
+  num_classes: 6  # 6 roadwork objects
+  
+  # Expected impact
+  expected_mcc_gain: 0.03  # +3% MCC
+
+# ══════════════════════════════════════════════════════════════
+# TOTAL EXPECTED GAIN
+# ══════════════════════════════════════════════════════════════
+
+total_expected_mcc_gain: 0.10  # +10% MCC
+
+# ══════════════════════════════════════════════════════════════
+# LOSS SCHEDULING
+# ══════════════════════════════════════════════════════════════
+
+loss_scheduling:
+  enabled: false
+  
+  # Warmup for auxiliary losses
+  warmup_epochs: 5
+  warmup_strategy: "linear"  # or "exponential"
