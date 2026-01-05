@@ -62,8 +62,9 @@
 - MoE-LLaVA + SparK (4.0GB)
 
 ## Level 5: Precision Tier (18.3GB with EVICPRESS)
-**2 flagship models**:
-- Qwen3-VL-72B + Eagle-3 + EVICPRESS (6.5GB)
+**2-3 flagship models** (choose based on needs):
+- **Option A (Default)**: Qwen3-VL-72B + Eagle-3 + EVICPRESS (6.5GB)
+- **Option B (Flagship)**: Qwen3-VL-235B-A22B-Thinking + EVICPRESS (7.5GB) - NEW! Beats Gemini 2.5 Pro
 - InternVL3.5-78B + EVICPRESS (4.5GB)
 
 ## Level 6: Consensus (29.0GB)
@@ -91,11 +92,12 @@
 | p-MoD | ⚠️ Research | **Layer skipping in vLLM** (future) | Not critical for Week 1 |
 
 **CRITICAL ADDITIONS** (Not in masterplan7.md but ESSENTIAL):
-- **vLLM V1 Engine** (0.8.1+) - 24% better throughput vs V0
-- **GEAR** (near-lossless 4-bit KV compression)
-- **SnapKV** (8.2× memory efficiency)
-- **Expected Attention** (60% KV reduction, 0% accuracy loss)
+- **vLLM V1 Engine** (0.13.0 - LATEST STABLE, Dec 18 2025) - V0 completely removed
+- **GEAR** (near-lossless 4-bit KV compression) - GitHub production-ready
+- **SnapKV** (8.2× memory efficiency) - via NVIDIA KVPress
+- **Expected Attention** (60% KV reduction, 0% accuracy loss) - via NVIDIA KVPress
 - **AWQ/GPTQ** (4-bit model quantization, 75% memory)
+- **FlashInfer 0.3.0** (required by vLLM 0.13)
 
 ---
 
@@ -121,8 +123,8 @@ mkdir -p {
 # Install LOCAL testing dependencies (CPU-only)
 cat > requirements_local_test.txt << 'EOF'
 # === CORE (CPU mode for testing) ===
-torch==2.9.0+cpu
-torchvision==0.24.0+cpu
+torch==2.8.0+cpu  # Match production PyTorch version
+torchvision==0.23.0+cpu
 transformers>=4.57.0
 accelerate>=1.2.0
 
@@ -141,21 +143,23 @@ pip install -r requirements_local_test.txt
 
 # Create production requirements (for SSH deployment)
 cat > requirements_production.txt << 'EOF'
-# === CORE 2026 STACK ===
-vllm==0.8.1  # V1 engine is DEFAULT! +24% throughput
-torch==2.9.0
-torchvision==0.24.0
+# === CORE 2026 STACK (CORRECTED!) ===
+vllm==0.13.0  # LATEST STABLE (Dec 18, 2025) - V0 removed, V1 only
+torch==2.8.0  # REQUIRED by vLLM 0.13 (breaking change)
+torchvision==0.23.0  # Match PyTorch 2.8
 flash-attn>=2.7.0
+flashinfer==0.3.0  # REQUIRED by vLLM 0.13 for optimal attention
 transformers>=4.57.0
 accelerate>=1.2.0
 
-# === COMPRESSION (NVIDIA Official!) ===
+# === COMPRESSION (NVIDIA Official + GEAR!) ===
 kvpress>=0.2.5  # NVIDIA's official KV compression library
 nvidia-modelopt>=0.16.0  # FP4 quantization
 lmcache>=0.1.0  # Production KV offloading
 lmcache_vllm>=0.1.0
 autoawq>=0.2.7  # 4-bit quantization
 auto-gptq>=0.7.1
+git+https://github.com/opengear-project/GEAR.git  # Near-lossless 4-bit KV cache
 
 # === TRAINING ===
 unsloth>=2025.12.23  # Vision fine-tuning support
@@ -290,11 +294,22 @@ class ProductionCompressionStack:
         self.techniques.append(("KVCache-Factory", config))
         print(f"✅ Added KVCache-Factory ({method}) - 8.2× memory efficiency")
 
+    def add_gear_compression(self):
+        """GEAR - Near-lossless 4-bit KV compression (NEW!)"""
+        config = {
+            "bits": 4,
+            "accuracy_loss": "<0.1%",
+            "memory_reduction": "75%",
+            "library": "github.com/opengear-project/GEAR"
+        }
+        self.techniques.append(("GEAR 4-bit KV", config))
+        print(f"✅ Added GEAR compression - 75% memory, <0.1% accuracy loss")
+
     def get_total_memory_reduction(self) -> float:
         """Calculate cumulative memory reduction"""
-        # AWQ (75%) + NVIDIA KVPress (60%) + SnapKV (8.2×)
-        # Conservative estimate: 88% total reduction
-        return 0.88
+        # AWQ (75%) + NVIDIA KVPress (60%) + SnapKV (8.2×) + GEAR (75% KV)
+        # Conservative estimate: 90% total reduction
+        return 0.90  # Updated from 0.88
 
     def summary(self):
         """Print compression stack summary"""
@@ -551,24 +566,25 @@ class BatchDPOptimizer:
 
 **`src/optimizations_2026/chunked_prefill_config.py`**:
 ```python
-"""Chunked Prefill - Built-in vLLM (replaces LaCo research)"""
+"""Chunked Prefill - Built-in vLLM V1 engine (replaces LaCo research)"""
 
 class ChunkedPrefillOptimizer:
     """Native vLLM chunked prefill optimization"""
 
     def __init__(self):
         self.config = {
-            "flag": "--enable-chunked-prefill",
+            "automatic_in_v1": True,  # No flag needed in vLLM 0.13+
             "throughput_gain": "15%+",
             "replaces": "LaCo (ICLR 2026 research)"
         }
 
     def apply_to_vllm_command(self, base_command: str) -> str:
-        """Add chunked prefill flag to vLLM command"""
-        if "--enable-chunked-prefill" not in base_command:
-            base_command += " --enable-chunked-prefill"
-            print("✅ Applied Chunked Prefill (+15% throughput)")
-        return base_command
+        """
+        Chunked prefill is AUTOMATIC in vLLM 0.13 V1 engine.
+        This method is a no-op, kept for backwards compatibility.
+        """
+        print("✅ Chunked Prefill enabled (automatic in vLLM 0.13 V1)")
+        return base_command  # No flag needed!
 ```
 
 **Continue with all 7 optimization techniques...**
@@ -714,17 +730,15 @@ class UltimateDeployment2026:
         cmd_parts.append(f"--max-num-seqs {server['max_seqs']}")
         cmd_parts.append(f"--gpu-memory-utilization {server['gpu_util']}")
 
-        # Batch-DP optimization
+        # Batch-DP optimization (STILL NEEDED in vLLM 0.13)
         if self.techniques["batch_dp"]:
             cmd_parts.append("--mm-encoder-tp-mode data")
 
-        # Chunked prefill
-        if self.techniques["chunked_prefill"]:
-            cmd_parts.append("--enable-chunked-prefill")
-
-        # Prefix caching
-        if self.techniques["prefix_caching"]:
-            cmd_parts.append("--enable-prefix-caching")
+        # NOTE: vLLM 0.13 V1 engine enables these AUTOMATICALLY:
+        # - Chunked prefill (was --enable-chunked-prefill)
+        # - Prefix caching (was --enable-prefix-caching)
+        # - FULL_AND_PIECEWISE CUDA graphs
+        # No manual flags needed!
 
         # Speculative decoding
         if self.techniques["speculative_decoding"] and "speculative_model" in server:
