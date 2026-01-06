@@ -1468,6 +1468,161 @@ pytest tests/unit/ -v
 - Implement KVCache-Factory
 - Unit test all techniques
 
+---
+
+# 📋 IMPLEMENTATION APPROACH FOR DAY 3-10 ⚠️ READ THIS FIRST!
+
+## 🚨 CRITICAL NOTICE FOR IMPLEMENTING AGENTS
+
+The code examples in **Day 3-10 sections below (lines 1471-2684)** are **TEACHING EXAMPLES and ARCHITECTURAL REFERENCES** - NOT final production code ready to copy-paste!
+
+### ⚠️ Your Implementation Responsibilities:
+
+**DO NOT blindly copy-paste the example code!** Instead:
+
+1. **✅ Research Latest 2026 Libraries FIRST**
+   - Verify all library versions are CURRENT as of your implementation date
+   - Check for breaking API changes since this plan was written (Jan 2026)
+   - Review latest official documentation:
+     - vLLM: https://docs.vllm.ai/en/stable/
+     - NVIDIA KVPress: https://github.com/NVIDIA/kvpress
+     - SGLang: https://github.com/sgl-project/sglang
+     - LMDeploy: https://github.com/InternLM/lmdeploy
+     - Transformers: https://huggingface.co/docs/transformers
+     - DeepSeek-R1: https://huggingface.co/deepseek-ai/DeepSeek-R1
+   - Look for newer optimizations or techniques released after plan creation
+
+2. **✅ Expand & Improve Reference Code**
+   - Use examples as architectural guidance and starting points
+   - Add comprehensive error handling (GPU OOM, network failures, timeouts)
+   - Add structured logging with loguru
+   - Add metrics collection (Prometheus)
+   - Add type hints and docstrings
+   - Add configuration management (pydantic, environment variables)
+   - Add unit tests (pytest) and integration tests
+
+3. **✅ Validate Technical Accuracy**
+   - Confirm vLLM 0.13+ API hasn't changed
+   - Verify NVIDIA KVPress pipeline API is still current
+   - Check SGLang RadixAttention performance claims (1.1-1.2× multi-turn)
+   - Test DeepSeek-R1 integration with latest transformers
+   - Validate all optimization flags and parameters
+   - Profile GPU memory usage and inference latency
+
+4. **✅ Production Readiness Checklist**
+   - ✅ Comprehensive error handling (try/except, timeouts, fallbacks)
+   - ✅ Structured logging (loguru with JSON formatter)
+   - ✅ Metrics collection (Prometheus gauges, histograms)
+   - ✅ Configuration management (pydantic BaseSettings, .env files)
+   - ✅ Unit tests with pytest (>80% coverage)
+   - ✅ Integration tests with realistic data
+   - ✅ Deployment documentation (README.md, usage examples)
+   - ✅ Performance validation (benchmark against targets)
+
+### 🔍 Before Implementing Each File:
+
+**Step 1**: Check latest library versions
+```bash
+pip index versions vllm
+pip index versions transformers
+pip index versions kvpress
+pip index versions sglang
+pip index versions lmdeploy
+```
+
+**Step 2**: Review official GitHub repos for:
+- CHANGELOG.md for breaking changes
+- Latest example code and best practices
+- Open issues that might affect implementation
+- Security patches or bug fixes
+
+**Step 3**: Search community discussions:
+- vLLM Discord: https://discord.gg/vllm
+- NVIDIA Developer Forums: https://forums.developer.nvidia.com/
+- HuggingFace Discussions
+
+**Step 4**: Validate against latest benchmarks
+- Don't trust old performance claims
+- Run your own benchmarks when possible
+- Document actual measured performance
+
+### 🚫 Common Pitfalls to Avoid:
+
+1. **❌ Using Outdated APIs**
+   - Always check official docs before implementing
+   - Don't assume example code APIs are still current
+
+2. **❌ Missing Error Handling**
+   - Add try/except for GPU OOM scenarios
+   - Handle network failures gracefully (circuit breaker pattern)
+   - Add timeout protection (asyncio.wait_for)
+   - Add fallback strategies
+
+3. **❌ Ignoring Performance**
+   - Profile GPU memory usage (torch.cuda.memory_allocated)
+   - Monitor inference latency (track p50, p95, p99)
+   - Test with realistic batch sizes
+   - Validate against performance targets (67K-86K/s throughput)
+
+4. **❌ Poor Configuration Management**
+   - Use environment variables (.env files)
+   - Use pydantic for validation
+   - Don't hardcode paths, credentials, or hyperparameters
+   - Support both development and production configs
+
+### 📊 Success Criteria for Each File:
+
+For each file you implement, ensure:
+- ✅ Syntax validates: `python -m py_compile src/**/*.py`
+- ✅ Uses latest 2026 library versions (verified)
+- ✅ Includes comprehensive error handling
+- ✅ Has type hints and docstrings
+- ✅ Includes logging and metrics
+- ✅ Has unit tests (if time permits)
+- ✅ References latest documentation in comments
+- ✅ No hardcoded values (use config/env vars)
+- ✅ Performance validated against targets
+
+### 📚 The 13 Files to Implement:
+
+**Infrastructure Components (Day 3-5):**
+1. `src/infrastructure/detection/parallel_ensemble.py` - 85% throughput boost
+2. `src/infrastructure/streaming/nested_streaming.py` - Real-time UX + cancellation
+3. `src/infrastructure/warmup/model_warmup.py` - 10× faster first request
+4. `src/infrastructure/batching/vllm_native_batching.py` - Auto-batching (V1 engine)
+5. `src/infrastructure/resilience/circuit_breaker.py` - 99.97% uptime
+
+**Production Stack (Day 6-10):**
+6. `src/quantization/unified_quantization.py` - Unified quantization interface
+7. `src/infrastructure/unified_inference_engine.py` - Smart routing (vLLM/SGLang/LMDeploy)
+8. `src/compression_2026/unified_kv_compression.py` - 60% KV reduction
+9. `src/preprocessing/qwen3_native_dynamic_resolution.py` - Native dynamic resolution
+10. `src/models_2026/reasoning/deepseek_r1_production.py` - o1-level reasoning
+11. `src/optimizations_2026/mixture_of_depths.py` - 55.6% TFLOPs reduction
+12. `deployment/triton/deploy_triton.py` - Production serving
+13. `deployment/triton/model_repository/qwen_vl_72b/config.pbtxt` - Triton config
+
+### 🎯 Priority Order (If Time-Constrained):
+
+**HIGH Priority (Critical Path):**
+- ✅ parallel_ensemble.py - 85% throughput boost
+- ✅ circuit_breaker.py - 99.97% uptime
+- ✅ unified_kv_compression.py - 60% KV reduction
+
+**MEDIUM Priority (Performance):**
+- ✅ model_warmup.py - 10× faster first request
+- ✅ unified_inference_engine.py - Smart routing
+- ✅ deepseek_r1_production.py - o1-level reasoning
+
+**LOWER Priority (Nice-to-Have):**
+- Remaining 7 files (can implement iteratively)
+
+---
+
+**Remember**: The code below is your **starting point**, not your **final destination**. Research, validate, expand, and improve with the latest 2026 techniques! 🚀
+
+---
+
 ## 🔷 DAY 3-5 (24 hours): 5 Critical Infrastructure Components ⭐ **FROM LATEST RESEARCH**
 
 ### Goal
