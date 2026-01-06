@@ -1,0 +1,27 @@
+# === CORE (CPU mode for testing) ===
+torch==2.8.0+cpu  # Match production PyTorch version
+torchvision==0.23.0+cpu
+transformers>=4.57.0
+accelerate>=1.2.0
+
+# === TESTING FRAMEWORK ===
+pytest>=8.0.0
+pytest-cov>=4.1.0
+pytest-asyncio>=0.23.0
+pytest-mock>=3.12.0
+pytest-timeout>=2.2.0
+black>=24.0.0
+ruff>=0.6.0
+mypy>=1.11.0
+
+# === MOCK LIBRARIES ===
+# We'll create mock classes for GPU-dependent code
+# No vLLM, no CUDA dependencies for local testing
+
+# === UTILITIES ===
+pydantic>=2.0.0
+pyyaml>=6.0.0
+python-dotenv>=1.0.0
+tqdm>=4.66.0
+loguru>=0.7.0
+rich>=13.0.0  # Beautiful terminal output

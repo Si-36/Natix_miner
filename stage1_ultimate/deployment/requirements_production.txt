@@ -1,0 +1,44 @@
+# === CORE 2026 STACK (CORRECTED!) ===
+vllm==0.13.0  # LATEST STABLE (Dec 18, 2025) - V0 removed, V1 only
+torch==2.8.0  # REQUIRED by vLLM 0.13 (breaking change)
+torchvision==0.23.0  # Match PyTorch 2.8
+flash-attn>=2.7.0
+flashinfer==0.3.0  # REQUIRED by vLLM 0.13 for optimal attention
+transformers>=4.57.0
+accelerate>=1.2.0
+
+# === COMPRESSION (NVIDIA Official + GEAR!) ===
+kvpress>=0.2.5  # NVIDIA's official KV compression library
+nvidia-modelopt>=0.16.0  # FP4 quantization
+lmcache>=0.1.0  # Production KV offloading
+lmcache_vllm>=0.1.0
+autoawq>=0.2.7  # 4-bit quantization
+auto-gptq>=0.7.1
+git+https://github.com/opengear-project/GEAR.git  # Near-lossless 4-bit KV cache
+
+# === TRAINING ===
+unsloth>=2025.12.23  # Vision fine-tuning support
+peft>=0.14.0
+trl>=0.13.0
+
+# === DETECTION ===
+ultralytics>=8.3.48  # YOLO11, YOLO-Master
+timm>=1.0.11
+roboflow  # RF-DETR
+
+# === MONITORING ===
+fiftyone==1.11.0
+arize-phoenix>=5.0.0
+weave>=0.51.0
+wandb>=0.18.0
+
+# === UTILITIES ===
+kornia>=0.8.0
+opencv-python>=4.10.0
+pillow>=11.0.0
+numpy>=2.2.0
+scipy>=1.15.0
+scikit-learn>=1.6.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+loguru>=0.7.0
