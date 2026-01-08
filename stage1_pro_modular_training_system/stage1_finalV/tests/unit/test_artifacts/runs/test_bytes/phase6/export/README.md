@@ -1,1 +1,0 @@
-Hello, ArtifactStore! This is a test of atomic writes with fsync.
