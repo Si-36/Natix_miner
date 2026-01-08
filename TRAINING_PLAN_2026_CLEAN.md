@@ -27,8 +27,8 @@
 ## What This Plan Does
 
 This plan **enhances stage1_ultimate/** with the latest 2025/2026 training techniques to:
-- **30× faster VLM training** (UnSloth + FlashAttention-3)
-- **Faster, more stable convergence** (AdEMAMix for VLMs, MuSGD for Ultralytics detectors, Muon+AdamW hybrid for HF-style loops)
+- **Up to 30× faster VLM training** (UnSloth + FlashAttention-3; expect ~5–15× typical depending on setup)
+- **Faster, more stable convergence** (AdEMAMix for VLMs, Ultralytics `optimizer="auto"` for detectors, Muon+AdamW hybrid for HF-style loops)
 - **Fine-tune 8 new models** (YOLO-Master, Qwen3-VL, ADFNet, Depth Anything 3, etc.)
 - **Active learning pipeline** (sample hard examples from production)
 - **DPO alignment** (preference optimization)
@@ -187,7 +187,7 @@ print("gps_coverage", has_gps, "/", len(ds))
 
 | Component | Library/Technique | Impact | Status |
 |-----------|------------------|--------|--------|
-| **UnSloth Trainer** | unsloth>=2025.12.23 | 30× faster training | ⭐ NEW |
+| **UnSloth Trainer** | unsloth (install latest; pin after first working run) | Up to 30× faster training | ⭐ NEW |
 | **LoRA/QLoRA Trainer** | peft>=0.14.0 | Fine-tune 70B+ models | ⭐ NEW |
 | **Sophia-H Optimizer** | Custom (EXISTS) | 2× faster convergence | ✅ IMPLEMENTED |
 | **DPO Trainer** | trl>=0.13.0 | Alignment training | ⭐ NEW |
@@ -196,9 +196,9 @@ print("gps_coverage", has_gps, "/", len(ds))
 | **MCC Callback** | Custom | Track roadwork MCC | ⭐ NEW |
 | **EMA Callback** | Custom | Model stability | ⭐ NEW |
 | **DAPO (GRPO++)** | verl>=0.1.0 | +67% AIME (30%→50%) | 🔥 CRITICAL NEW |
-| **AdEMAMix Optimizer** | transformers>=4.57.0 | Stable VLM fine-tune | 🔥 CRITICAL NEW |
+| **AdEMAMix Optimizer** | transformers>=4.57.3 | Stable VLM fine-tune | 🔥 CRITICAL NEW |
 | **Muon+AdamW Hybrid** | torch>=2.8.0 (`torch.optim.Muon`) | Stable fine-tune | 🔥 CRITICAL NEW |
-| **MuSGD (YOLO26)** | ultralytics>=8.3.48 | Detector fine-tune | 🔥 HIGH NEW |
+| **Ultralytics Optimizer** | ultralytics `optimizer="auto"` | Detector fine-tune | 🔥 HIGH NEW |
 | **FlashAttention-3** | flash-attn>=3.0.0 | 1.5-2× faster, FP8 | 🔥 CRITICAL NEW |
 | **AdaLoRA** | peft>=0.14.0 | +2-3% accuracy | 🔥 CRITICAL NEW |
 | **VeRA** | peft>=0.14.0 | 99% fewer params | 🔥 CRITICAL NEW |
@@ -223,13 +223,13 @@ print("gps_coverage", has_gps, "/", len(ds))
 torch==2.8.0+cu121              # ⭐ PyTorch 2.8 (vLLM 0.13 + Muon optimizer)
 torchvision==0.23.0+cu121
 torchaudio==2.8.0+cu121
-transformers>=4.57.0            # ⭐ Latest stable 4.x line (Qwen3-VL + Llama 4 + AdEMAMix)
+transformers>=4.57.3            # ⭐ Latest stable 4.x line (Qwen3-VL + Llama 4 + AdEMAMix)
 flash-attn>=3.0.0               # ⭐ FlashAttention-3 (install with --no-build-isolation)
 
 # ===================================
 # ⭐ FAST TRAINING (VLM)
 # ===================================
-unsloth>=2025.12.23             # 30× faster training for LLMs/VLMs
+unsloth                          # Install latest on SSH box: `pip install -U unsloth`
 flash-attn>=3.0.0               # Required by UnSloth (UPGRADED!)
 bitsandbytes>=0.45.0            # 4-bit quantization
 
@@ -296,9 +296,10 @@ pydantic>=2.0.0                 # Config validation
 ```
 
 **Notes**:
-- AdEMAMix is included in `transformers>=4.57.0` (no extra package).
-- MuSGD is built into `ultralytics>=8.3.48` for YOLO-family training.
+- AdEMAMix is included in `transformers>=4.57.3` (no extra package).
+- Ultralytics supports `optimizer="auto"`; do not hardcode MuSGD unless you verify it exists in your installed Ultralytics version and it’s actually being selected.
 - Muon is included in `torch.optim` (PyTorch 2.8+).
+- Version policy: prefer stable releases (avoid `transformers` v5 RCs unless you accept churn).
 
 ---
 
@@ -308,7 +309,7 @@ pydantic>=2.0.0                 # Config validation
 
 | Component | Library/Technique | Impact | Status |
 |-----------|------------------|--------|--------|
-| **UnSloth Trainer** | unsloth>=2025.12.23 | 30× faster training | ⭐ NEW |
+| **UnSloth Trainer** | unsloth (install latest; pin after first working run) | Up to 30× faster training | ⭐ NEW |
 | **LoRA/QLoRA Trainer** | peft>=0.14.0 | Fine-tune 70B+ models | ⭐ NEW |
 | **Sophia-H Optimizer** | Custom (EXISTS) | 2× faster convergence | ✅ IMPLEMENTED |
 | **DPO Trainer** | trl>=0.13.0 | Alignment training | ⭐ NEW |
@@ -351,7 +352,7 @@ pydantic>=2.0.0                 # Config validation
 #### **🔥 Breakthrough #4: Latest Optimizers** 🚀 HIGH
 - **AdEMAMix (Transformers built-in)**: strong, stable VLM fine-tuning
 - **Muon+AdamW hybrid**: stable fine-tuning (use Muon at lower LR)
-- **MuSGD (Ultralytics / YOLO26)**: strong detector fine-tuning defaults
+- **Ultralytics optimizer="auto"**: strong detector defaults (verify the chosen optimizer in logs)
 - **Schedule-Free AdamW**: optional fallback when you want “no LR schedule” simplicity
 
 ---
@@ -360,13 +361,13 @@ pydantic>=2.0.0                 # Config validation
 
 | What you are training | Use | Why |
 |---|---|---|
-| **VLM fine-tune** (Qwen3-VL / Llama 4 / InternVL) | **AdEMAMix** (`transformers>=4.57.0`) | Stable VLM fine-tuning |
-| **Ultralytics detectors** (YOLO-Master / YOLO11 / YOLO26) | **MuSGD** (Ultralytics built-in) | Optimized for detector training |
+| **VLM fine-tune** (Qwen3-VL / Llama 4 / InternVL) | **AdEMAMix** (`transformers>=4.57.3`) | Stable VLM fine-tuning |
+| **Ultralytics detectors** (YOLO-Master / YOLO11 / YOLO26) | **optimizer="auto"** (Ultralytics) | Optimized detector defaults |
 | **Existing Stage1 backbone** | **Keep existing optimizer** (e.g. Sophia-H where already implemented) | Avoid unnecessary churn |
 | **HF-style custom loops** (vision backbones, RF-DETR outside Ultralytics) | **Muon+AdamW hybrid** (`torch.optim.Muon`) | Stability (AdamW) + speed (Muon) |
 | **“No schedule” quick runs** | **Schedule-Free AdamW** | Fewer knobs; good fallback |
 
-**Rule of thumb**: if you can train it inside Ultralytics, start with MuSGD; if it’s a VLM, start with AdEMAMix; otherwise use Muon+AdamW hybrid.
+**Rule of thumb**: if you can train it inside Ultralytics, start with `optimizer="auto"`; if it’s a VLM, start with AdEMAMix; otherwise use Muon+AdamW hybrid.
 
 **Do not use (in this plan)**:
 - Prodigy (keep the optimizer surface area small)
@@ -1200,7 +1201,7 @@ DoRA + RMS Norm:   92.0% accuracy (+1.5%)
 
 #### **File 10**: `stage1_ultimate/src/training/optimizers/ademamix.py` ⭐ CRITICAL!
 
-**What It Does**: AdEMAMix wrapper (available in `transformers>=4.57.0`)
+**What It Does**: AdEMAMix wrapper (available in `transformers>=4.57.3`)
 **Impact**: stable, efficient VLM fine-tuning
 
 ```python
@@ -1233,7 +1234,7 @@ class AdEMAMixOptimizer:
 
 **When to Use**:
 - ✅ VLM fine-tuning (Qwen3-VL, Llama 4, InternVL)
-- ❌ Ultralytics YOLO training (use MuSGD there)
+- ❌ Ultralytics YOLO training (use `optimizer="auto"` there)
 
 ---
 
@@ -1360,7 +1361,7 @@ if __name__ == "__main__":
 ```
 
 **When to Use**:
-- ✅ Optional fallback when you want **no LR schedule** and you are *not* using AdEMAMix (VLM) or MuSGD (Ultralytics)
+- ✅ Optional fallback when you want **no LR schedule** and you are *not* using AdEMAMix (VLM) or Ultralytics `optimizer="auto"` (detectors)
 - ✅ Quick experiments where you want fewer knobs
 
 **Expected Impact**:
@@ -1373,75 +1374,11 @@ if __name__ == "__main__":
 
 **Status**: ❌ Removed from the recommended 2026 stack.
 
-**Why**: This plan prioritizes a smaller optimizer surface area: **AdEMAMix** (VLMs), **MuSGD** (Ultralytics), and **Muon+AdamW hybrid** (HF-style loops).
+**Why**: This plan prioritizes a smaller optimizer surface area: **AdEMAMix** (VLMs), **Ultralytics `optimizer="auto"`** (detectors), and **Muon+AdamW hybrid** (HF-style loops).
 
 **What It Does**: Prodigy (Parameter-Free Adaptive Learning Rate)
 **Library**: `prodigyopt>=1.0.0` (not included in recommended requirements)
 **Impact**: Parameter-free LR tuning
-
-```python
-"""
-Prodigy Optimizer - Parameter-Free Adaptive Learning Rate
-No LR tuning needed!
-"""
-
-from prodigyopt import Prodigy
-import torch
-import logging
-
-logger = logging.getLogger(__name__)
-
-
-def create_prodigy_optimizer(
-    model,
-    lr=1.0,  # Adapts automatically!
-    betas=(0.9, 0.999),
-    weight_decay=0.01
-):
-    """
-    Create Prodigy optimizer
-    
-    Impact: No LR tuning needed! Adapts automatically
-    
-    Args:
-        model: PyTorch model
-        lr: Initial LR (1.0 recommended, adapts automatically!)
-        betas: Adam betas
-        weight_decay: Weight decay
-        
-    Returns:
-        Prodigy optimizer
-    """
-    optimizer = Prodigy(
-        model.parameters(),
-        lr=lr,
-        betas=betas,
-        weight_decay=weight_decay,
-        decouple=True,
-        safeguard_warmup=True
-    )
-    
-    logger.info("✅ Prodigy optimizer created")
-    logger.info("   Parameter-free LR (no tuning needed!)")
-    
-    return optimizer
-
-
-# ===================================
-# USAGE EXAMPLE
-# ===================================
-
-if __name__ == "__main__":
-    from transformers import AutoModelForCausalLM
-    
-    model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-VL-72B-Instruct")
-    
-    # Create Prodigy optimizer
-    optimizer = create_prodigy_optimizer(model.parameters())
-    
-    # Train - LR adapts automatically!
-    pass
-```
 
 **Expected Impact**:
 - ✅ **Zero LR tuning** (adapts automatically!)
@@ -1452,11 +1389,11 @@ if __name__ == "__main__":
 
 **Status**: ❌ Removed from the recommended 2026 stack.
 
-**Why**: Prefer **Muon+AdamW hybrid** for stability; and for Ultralytics detectors use **MuSGD** (built-in).
+**Why**: Prefer **Muon+AdamW hybrid** for stability; and for Ultralytics detectors use `optimizer="auto"`.
 
 **Note**:
 - Muon is available as `torch.optim.Muon` in PyTorch 2.8+.
-- For this plan: use **Muon inside the hybrid** (File 11) for HF-style loops, and use **MuSGD** for Ultralytics detectors.
+- For this plan: use **Muon inside the hybrid** (File 11) for HF-style loops, and use `optimizer="auto"` for Ultralytics detectors.
 
 ---
 
@@ -1467,7 +1404,7 @@ if __name__ == "__main__":
 **Why**: Prefer **Schedule-Free AdamW** (no schedule), or keep existing schedulers already implemented in `stage1_ultimate/src/training/schedulers/`.
 
 **What It Does**: WSD (Warmup-Stable-Decay) Scheduler - Modern 3-phase LR schedule
-**Library**: `transformers>=4.57.0` (built-in!) + Custom implementation
+**Library**: `transformers>=4.57.3` (built-in!) + Custom implementation
 **Impact**: +10-15% better convergence, stable training plateau
 
 ```python
@@ -1780,7 +1717,7 @@ class LatestAugmentation2025:
 """
 YOLO-Master Fine-Tuning for Roadwork Detection
 ES-MoE adaptive detection (Dec 27, 2025 SOTA!)
-Uses Ultralytics built-in optimizer selection (MuSGD in modern Ultralytics)
+Uses Ultralytics built-in optimizer selection (`optimizer="auto"`; verify in logs)
 """
 
 from ultralytics import YOLO
@@ -1800,7 +1737,7 @@ class YOLOMasterTrainer:
     - 60-65% mAP expected on roadwork
     
     Optimizer guidance:
-    - Prefer `optimizer="auto"` (Ultralytics chooses the best default; MuSGD on modern Ultralytics).
+    - Prefer `optimizer="auto"` (Ultralytics chooses the best default; verify what was selected in the logs).
     - Do NOT assume Ultralytics will accept arbitrary optimizer strings (e.g. "sophia-h") without patching.
     """
     
@@ -1846,7 +1783,7 @@ class YOLOMasterTrainer:
             'workers': 8,
             'project': 'outputs/yolo_master',
             'name': 'roadwork_detection',
-            'optimizer': 'auto',  # MuSGD on modern Ultralytics
+            'optimizer': 'auto',  # Let Ultralytics pick; verify in logs
             
             # Augmentations
             'hsv_h': 0.015,
