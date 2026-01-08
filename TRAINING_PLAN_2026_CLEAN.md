@@ -3694,7 +3694,7 @@ aqlm>=1.0.0                     # 2-bit extreme compression
 - [ ] Training requirements installed (`requirements/production.txt`)
 
 ### **Week 1.5: Latest 2025/2026 Techniques** 🚀 CRITICAL
-- [ ] DAPO trainer created (`src/training/rlvr/dapo_grpo_trainer.py`) 🔥 (optional unless doing VLM RL)
+- - [ ] DAPO trainer created (...dapo_grpo_trainer.py`) ⚠️ OPTIONAL (only for VLM RL; skip for Stage 1 DINOv3)
 - [ ] AdaLoRA config created (`src/training/lora/adalora_config.py`) 🔥
 - [ ] VeRA config created (`src/training/lora/vera_config.py`) 🔥
 - [ ] IA³ config created (`src/training/lora/ia3_config.py`)
