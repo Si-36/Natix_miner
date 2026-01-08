@@ -27,8 +27,8 @@
 ## What This Plan Does
 
 This plan **enhances stage1_ultimate/** with the latest 2025/2026 training techniques to:
-- **42× faster training** (UnSloth 30× + SOAP 1.4×)
-- **2× faster convergence** (Sophia-H for detection, SOAP for VLMs)
+- **30× faster VLM training** (UnSloth + FlashAttention-3)
+- **Faster, more stable convergence** (AdEMAMix for VLMs, MuSGD for Ultralytics detectors, Muon+AdamW hybrid for HF-style loops)
 - **Fine-tune 8 new models** (YOLO-Master, Qwen3-VL, ADFNet, Depth Anything 3, etc.)
 - **Active learning pipeline** (sample hard examples from production)
 - **DPO alignment** (preference optimization)
@@ -143,7 +143,9 @@ stage1_ultimate/src/
 | **MCC Callback** | Custom | Track roadwork MCC | ⭐ NEW |
 | **EMA Callback** | Custom | Model stability | ⭐ NEW |
 | **DAPO (GRPO++)** | verl>=0.1.0 | +67% AIME (30%→50%) | 🔥 CRITICAL NEW |
-| **SOAP Optimizer** | soap-optimizer>=0.1.0 | +40% VLM convergence | 🔥 CRITICAL NEW |
+| **AdEMAMix Optimizer** | transformers>=4.44.0 | Stable VLM fine-tune | 🔥 CRITICAL NEW |
+| **Muon+AdamW Hybrid** | Muon (GitHub) + torch | Stable finetune | 🔥 CRITICAL NEW |
+| **MuSGD (YOLO26)** | ultralytics>=8.3.48 | Detector fine-tune | 🔥 HIGH NEW |
 | **FlashAttention-3** | flash-attn>=3.0.0 | 1.5-2× faster, FP8 | 🔥 CRITICAL NEW |
 | **AdaLoRA** | peft>=0.14.0 | +2-3% accuracy | 🔥 CRITICAL NEW |
 | **VeRA** | peft>=0.14.0 | 99% fewer params | 🔥 CRITICAL NEW |
@@ -154,14 +156,18 @@ stage1_ultimate/src/
 
 ## 📦 Complete Requirements Update
 
-### **NEW Training Libraries** → `stage1_ultimate/requirements/training.txt`
+### **Recommended requirements files**
+- **GPU/SSH production**: `stage1_ultimate/requirements/production.txt`
+- **Local syntax-only validation**: `stage1_ultimate/requirements/syntax_check.txt`
+
+### **GPU/SSH Production** → `stage1_ultimate/requirements/production.txt`
 
 ```txt
 # ===================================
 # ⭐ CRITICAL UPGRADES - UPDATE THESE!
 # ===================================
 flash-attn>=3.0.0               # ⭐ FlashAttention-3 (1.5-2× faster, FP8!)
-transformers>=4.50.0            # ⭐ Qwen3-VL, Llama 4 support
+transformers>=4.44.0            # ⭐ AdEMAMix built-in + modern VLM support
 torch>=2.8.0+cu121              # ⭐ PyTorch 2.8+ required
 
 # ===================================
@@ -180,11 +186,12 @@ trl>=0.13.0                     # DPO, PPO, GRPO alignment training
 # ===================================
 # ⭐ OPTIMIZERS & SCHEDULERS
 # ===================================
-soap-optimizer>=0.1.0           # SOAP (+40% VLM convergence) ⭐ NEW!
 schedulefree>=1.0.0             # Schedule-Free AdamW (no LR schedule!) ⭐ NEW!
-prodigyopt>=1.0.0               # Prodigy (parameter-free LR) ⭐ NEW!
-muon-optimizer>=0.1.0           # Muon (+35% detection convergence) ⭐ NEW!
 accelerate>=1.2.0               # Multi-GPU training
+lion-pytorch                    # Optional (memory-friendly), keep optional
+
+# Muon optimizer (GitHub install; used by Muon+AdamW hybrid)
+# pip install git+https://github.com/KellerJordan/Muon.git
 
 # ===================================
 # ⭐ RLVR TRAINING (DAPO/GRPO++) - NEW!
@@ -233,7 +240,10 @@ omegaconf>=2.3.0                # Already used
 pydantic>=2.0.0                 # Config validation
 ```
 
-**Total New Libraries**: **10** (flash-attn-3, soap-optimizer, schedulefree, prodigyopt, muon-optimizer, verl, nvidia-modelopt, llm-compressor, lmdeploy, aqlm)
+**Notes**:
+- AdEMAMix is included in `transformers>=4.44.0` (no extra package).
+- MuSGD is built into `ultralytics>=8.3.48` for YOLO-family training.
+- Muon is installed from GitHub (see comment above).
 
 ---
 
@@ -284,10 +294,10 @@ pydantic>=2.0.0                 # Config validation
 - **Source**: Dao AI Lab July 2024 release
 
 #### **🔥 Breakthrough #4: Latest Optimizers** 🚀 HIGH
-- **SOAP**: +40% VLM convergence speed
-- **Schedule-Free AdamW**: No LR schedule needed!
-- **Prodigy**: Parameter-free adaptive LR
-- **Muon**: +35% detection model convergence
+- **AdEMAMix (Transformers built-in)**: strong, stable VLM fine-tuning
+- **Muon+AdamW hybrid**: stable fine-tuning (use Muon at lower LR)
+- **MuSGD (Ultralytics / YOLO26)**: strong detector fine-tuning defaults
+- **Schedule-Free AdamW**: optional fallback when you want “no LR schedule” simplicity
 
 #### **🔥 Breakthrough #5: Data Augmentation** 🚀 HIGH
 - **TrivialAugment**: Zero hyperparameters, beats RandAugment!
@@ -1063,110 +1073,89 @@ DoRA + RMS Norm:   92.0% accuracy (+1.5%)
 
 ---
 
-### **Day 5-6: FlashAttention-3 + Latest Optimizers (16 hours) 🚀 CRITICAL!**
+### **Day 5-6: FlashAttention-3 + Modern Optimizers (16 hours) 🚀 CRITICAL!**
 
-#### **File 10**: `stage1_ultimate/src/training/optimizers/soap.py` ⭐ CRITICAL!
+#### **File 10**: `stage1_ultimate/src/training/optimizers/ademamix.py` ⭐ CRITICAL!
 
-**What It Does**: SOAP (Sharpness-Aware Minimization for VLMs)
-**Library**: `soap-optimizer>=0.1.0`
-**Impact**: +40% VLM convergence speed
+**What It Does**: AdEMAMix wrapper (available in `transformers>=4.44.0`)
+**Impact**: stable, efficient VLM fine-tuning
 
 ```python
 """
-SOAP Optimizer - ICLR 2025
-+40% faster convergence on VLMs (Qwen3-VL, Llama 4)
-Better than Sophia-H for vision-language models!
+AdEMAMix wrapper (ICLR 2025; implemented in Transformers).
+Use for VLM fine-tuning (Qwen3-VL, Llama 4, InternVL).
 """
 
-# Install
-# pip install soap-optimizer
-
-from soap import SOAP
-import torch
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-class SOAPOptimizer:
-    """
-    SOAP (Sharpness-Aware Minimization for Vision-Language Models)
-    
-    Key benefits over Sophia-H:
-    - +40% faster convergence on VLMs
-    - Better generalization on vision tasks
-    - Lower memory usage than AdamW
-    
-    Use for:
-    - Qwen3-VL fine-tuning (all sizes)
-    - Llama 4 Maverick/Scout
-    - Phi-4-Multimodal
-    - Molmo 2
-    """
-    
+class AdEMAMixOptimizer:
     @staticmethod
-    def create(model_parameters, lr=2e-4, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.01):
-        """
-        Create SOAP optimizer
-        
-        Args:
-            model_parameters: Model parameters to optimize
-            lr: Learning rate (2e-4 recommended for VLMs)
-            betas: Adam betas
-            eps: Epsilon for numerical stability
-            weight_decay: Weight decay
-            
-        Returns:
-            SOAP optimizer instance
-        """
-        optimizer = SOAP(
+    def create(model_parameters, lr=2e-4, betas=(0.9, 0.999), weight_decay=0.01, alpha=5.0, eps=1e-8):
+        from transformers.optimization import AdEMAMix
+
+        optimizer = AdEMAMix(
             model_parameters,
             lr=lr,
             betas=betas,
-            eps=eps,
             weight_decay=weight_decay,
-            sharpness_aware=True  # Enable SAM component
+            alpha=alpha,
+            eps=eps,
         )
-        
-        logger.info(f"✅ SOAP optimizer created (lr={lr})")
-        logger.info("   +40% faster VLM convergence vs AdamW!")
-        
+        logger.info(f"✅ AdEMAMix created (lr={lr}, alpha={alpha})")
         return optimizer
-
-
-# ===================================
-# USAGE WITH QWEN3-VL
-# ===================================
-
-if __name__ == "__main__":
-    from transformers import AutoModelForCausalLM
-    
-    # Load model
-    model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-VL-72B-Instruct")
-    
-    # Create SOAP optimizer (instead of AdamW)
-    optimizer = SOAPOptimizer.create(
-        model.parameters(),
-        lr=2e-4
-    )
-    
-    # Use in training loop
-    # optimizer.step()
 ```
 
 **When to Use**:
-- ✅ Qwen3-VL fine-tuning (4B, 8B, 32B, 72B)
-- ✅ Llama 4 Maverick/Scout
-- ✅ Any vision-language model
-- ❌ Don't use for detection models (use Sophia-H instead)
-
-**Expected Impact**:
-- ✅ Training time: **40% faster** than AdamW on VLMs
-- ✅ Example: Qwen3-VL-72B: 0.8 hours (UnSloth) → **0.5 hours** (UnSloth + SOAP)
+- ✅ VLM fine-tuning (Qwen3-VL, Llama 4, InternVL)
+- ❌ Ultralytics YOLO training (use MuSGD there)
 
 ---
 
-#### **File 11**: `stage1_ultimate/src/training/optimizers/schedule_free_adamw.py`
+#### **File 11**: `stage1_ultimate/src/training/optimizers/muon_adamw_hybrid.py` ⭐ CRITICAL!
+
+**What It Does**: Muon+AdamW hybrid helper (stable fine-tuning; use Muon at lower LR)
+**Requires**: `pip install git+https://github.com/KellerJordan/Muon.git`
+
+```python
+"""
+Muon+AdamW hybrid helper.
+Goal: stability of AdamW + fast convergence of Muon.
+"""
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class MuonAdamWHybrid:
+    @staticmethod
+    def create(model, lr=1e-3, lr_muon=1e-4, weight_decay=0.01, betas=(0.9, 0.999)):
+        import torch
+        from muon import Muon
+
+        adamw = torch.optim.AdamW(model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
+        muon = Muon(model.parameters(), lr=lr_muon)
+
+        logger.info(f"✅ Hybrid created (adamw_lr={lr}, muon_lr={lr_muon})")
+        return {"adamw": adamw, "muon": muon}
+
+    @staticmethod
+    def step(optimizers):
+        optimizers["muon"].step()
+        optimizers["adamw"].step()
+
+    @staticmethod
+    def zero_grad(optimizers, set_to_none=True):
+        optimizers["muon"].zero_grad(set_to_none=set_to_none)
+        optimizers["adamw"].zero_grad(set_to_none=set_to_none)
+```
+
+---
+
+#### **File 12**: `stage1_ultimate/src/training/optimizers/schedule_free_adamw.py`
 
 **What It Does**: Schedule-Free AdamW - No Learning Rate Schedule Needed!
 **Library**: `schedulefree>=1.0.0`
@@ -1241,9 +1230,8 @@ if __name__ == "__main__":
 ```
 
 **When to Use**:
-- ✅ Detection models (YOLO-Master, RF-DETR, ADFNet)
-- ✅ DINOv3 training
-- ✅ Any model where you want to avoid LR tuning
+- ✅ Optional fallback when you want **no LR schedule** and you are *not* using AdEMAMix (VLM) or MuSGD (Ultralytics)
+- ✅ Quick experiments where you want fewer knobs
 
 **Expected Impact**:
 - ✅ **+10-15% faster convergence**
@@ -1251,10 +1239,14 @@ if __name__ == "__main__":
 
 ---
 
-#### **File 12**: `stage1_ultimate/src/training/optimizers/prodigy.py`
+#### Appendix: Prodigy Optimizer (Deprecated)
+
+**Status**: ❌ Removed from the recommended 2026 stack.
+
+**Why**: This plan prioritizes a smaller optimizer surface area: **AdEMAMix** (VLMs), **MuSGD** (Ultralytics), and **Muon+AdamW hybrid** (HF-style loops).
 
 **What It Does**: Prodigy (Parameter-Free Adaptive Learning Rate)
-**Library**: `prodigyopt>=1.0.0`
+**Library**: `prodigyopt>=1.0.0` (not included in recommended requirements)
 **Impact**: Parameter-free LR tuning
 
 ```python
@@ -1326,10 +1318,14 @@ if __name__ == "__main__":
 
 ---
 
-#### **File 13**: `stage1_ultimate/src/training/optimizers/muon.py`
+#### Appendix: Muon Optimizer (Deprecated; use Muon+AdamW hybrid)
+
+**Status**: ❌ Removed from the recommended 2026 stack.
+
+**Why**: Prefer **Muon+AdamW hybrid** for stability; and for Ultralytics detectors use **MuSGD** (built-in).
 
 **What It Does**: Muon (+35% detection model convergence)
-**Library**: `muon-optimizer>=0.1.0`
+**Library**: Muon (GitHub install; not included in pip requirements)
 **Impact**: +35% detection convergence
 
 ```python
@@ -1338,8 +1334,8 @@ Muon Optimizer - GPU-Accelerated Optimizer for Vision Models
 +35% faster convergence on detection models!
 """
 
-# Install
-# pip install muon-optimizer
+# Install (GitHub)
+# pip install git+https://github.com/KellerJordan/Muon.git
 
 from muon import Muon
 import torch
@@ -1404,10 +1400,14 @@ if __name__ == "__main__":
 
 ---
 
-#### **File 14**: `stage1_ultimate/src/training/schedulers/wsd_scheduler.py` ⭐ NEW!
+#### Appendix: WSD Scheduler (Deprecated)
+
+**Status**: ❌ Removed from the recommended 2026 stack.
+
+**Why**: Prefer **Schedule-Free AdamW** (no schedule), or keep existing schedulers already implemented in `stage1_ultimate/src/training/schedulers/`.
 
 **What It Does**: WSD (Warmup-Stable-Decay) Scheduler - Modern 3-phase LR schedule
-**Library**: `transformers>=4.50.0` (built-in!) + Custom implementation
+**Library**: `transformers>=4.44.0` (built-in!) + Custom implementation
 **Impact**: +10-15% better convergence, stable training plateau
 
 ```python
@@ -1700,10 +1700,10 @@ class LatestAugmentation2025:
 | Component | Previous Target | New Target with Updates | Improvement |
 |-----------|----------------|----------------------|-------------|
 | **AIME** | 30% | **50%** (+67% with DAPO) | 🚀 |
-| **VLM Convergence** | 2× AdamW | **2.8×** (+40% with SOAP) | 🚀 |
+| **VLM Convergence** | 2× AdamW | **2×+** (AdEMAMix + UnSloth) | 🚀 |
 | **Object Detection mAP** | 60-65% | **68-70%** (+3.5% with CutMix) | 🚀 |
 | **LoRA Params** | 100% | **1%** (99% reduction with VeRA) | 🚀 |
-| **Training Time** | 24h (72B) | **14.4h** (SOAP+UnSloth) | 🚀 |
+| **Training Time** | 24h (72B) | **Reduced** (UnSloth + FlashAttention-3; GPU-dependent) | 🚀 |
 
 ---
 
@@ -3439,7 +3439,7 @@ Extreme Memory Constraints:
 
 **Updated Requirements**:
 ```txt
-# Advanced Quantization (add to requirements/training.txt)
+# Advanced Quantization (add to requirements/production.txt)
 nvidia-modelopt>=0.17.0         # FP8 quantization (H100+)
 llm-compressor>=0.3.0           # INT8/MXINT8
 lmdeploy>=0.10.0                # MXFP4 TurboMind
@@ -3448,7 +3448,7 @@ aqlm>=1.0.0                     # 2-bit extreme compression
 
 ---
 
-## 📊 COMPLETE FILE MAPPING (26 files total - UPDATED!)
+## 📊 CORE FILE MAPPING (minimum set - UPDATED!)
 
 ### **Training Infrastructure** (5 files)
 | # | File Path | Status |
@@ -3459,37 +3459,36 @@ aqlm>=1.0.0                     # 2-bit extreme compression
 | **4** | `src/training/callbacks/mcc_callback.py` | 🆕 NEW |
 | **5** | `src/training/callbacks/ema_callback.py` | 🆕 NEW |
 
-### **Week 1.5: Latest 2025/2026 Techniques** (9 files) 🚀 JUST ADDED!
+### **Week 1.5: Latest 2025/2026 Techniques** (8 files) 🚀 UPDATED!
 | # | File Path | Priority |
 |---|-----------|----------|
 | **6** | `src/training/rlvr/dapo_grpo_trainer.py` | 🚀 CRITICAL |
 | **7** | `src/training/lora/adalora_config.py` | 🚀 CRITICAL |
 | **8** | `src/training/lora/vera_config.py` | 🚀 CRITICAL |
 | **9** | `src/training/lora/ia3_config.py` | HIGH |
-| **10** | `src/training/optimizers/soap.py` | 🚀 CRITICAL |
-| **11** | `src/training/optimizers/schedule_free_adamw.py` | HIGH |
-| **12** | `src/training/optimizers/prodigy.py` | MEDIUM |
-| **13** | `src/training/optimizers/muon.py` | HIGH |
-| **14** | `src/data/augmentation/latest_aug_2025.py` | HIGH |
+| **10** | `src/training/optimizers/ademamix.py` | 🚀 CRITICAL |
+| **11** | `src/training/optimizers/muon_adamw_hybrid.py` | 🚀 CRITICAL |
+| **12** | `src/training/optimizers/schedule_free_adamw.py` | HIGH |
+| **13** | `src/data/augmentation/latest_aug_2025.py` | HIGH |
 
 ### **Week 2: New Model Implementations** (7 files)
 | # | File Path | Model |
 |---|-----------|--------|
-| **15** | `src/models_2026/detection/yolo_master_trainer.py` | YOLO-Master-N |
-| **16** | `src/models_2026/detection/rf_detr_trainer.py` | RF-DETR-large |
-| **17** | `src/models_2026/detection/adfnet_trainer.py` | ADFNet night specialist |
-| **18** | `src/models_2026/vlm/qwen3_vl_72b_trainer.py` | Qwen3-VL-72B QLoRA |
-| **19** | `src/models_2026/vlm/llama4_maverick_trainer.py` | Llama 4 Maverick LoRA |
-| **20** | `src/models_2026/vlm/qwen3_vl_4b_trainer.py` | Qwen3-VL-4B LoRA |
-| **21** | `src/models_2026/depth/depth_anything_v3_trainer.py` | Depth Anything 3 |
+| **14** | `src/models_2026/detection/yolo_master_trainer.py` | YOLO-Master-N |
+| **15** | `src/models_2026/detection/rf_detr_trainer.py` | RF-DETR-large |
+| **16** | `src/models_2026/detection/adfnet_trainer.py` | ADFNet night specialist |
+| **17** | `src/models_2026/vlm/qwen3_vl_72b_trainer.py` | Qwen3-VL-72B QLoRA |
+| **18** | `src/models_2026/vlm/llama4_maverick_trainer.py` | Llama 4 Maverick LoRA |
+| **19** | `src/models_2026/vlm/qwen3_vl_4b_trainer.py` | Qwen3-VL-4B LoRA |
+| **20** | `src/models_2026/depth/depth_anything_v3_trainer.py` | Depth Anything 3 |
 
 ### **Week 3: Advanced Techniques** (2 files) 🆕 NEW!
 | # | File Path | Status |
 |---|-----------|--------|
-| **22** | `src/training/active_learning/sampler.py` | 🆕 NEW |
-| **23** | `src/training/distillation/vl2lite_distiller.py` | 🆕 NEW |
+| **21** | `src/training/active_learning/sampler.py` | 🆕 NEW |
+| **22** | `src/training/distillation/vl2lite_distiller.py` | 🆕 NEW |
 
-**Total**: **23 files** (no duplicates!)
+**Note**: Additional optional/experimental modules appear later in this document; keep the list above as the minimum “core” set.
 
 ---
 
@@ -3503,7 +3502,7 @@ aqlm>=1.0.0                     # 2-bit extreme compression
 ### **Week 1.5: Latest 2025/2026 Techniques (40 hours)**
 - **Day 1-2**: DAPO implementation (16h) 🔥 CRITICAL
 - **Day 3-4**: Advanced PEFT configs (12h) 🔥 CRITICAL
-- **Day 5-6**: SOAP, Schedule-Free, Prodigy, Muon optimizers (16h) 🔥 HIGH
+- **Day 5-6**: AdEMAMix + Muon+AdamW hybrid + Schedule-Free (16h) 🔥 HIGH
 - **Day 7-8**: Latest augmentation (8h) 🆕 HIGH
 
 ### **Week 2: Model Implementations (40 hours)**
@@ -3531,7 +3530,7 @@ aqlm>=1.0.0                     # 2-bit extreme compression
 
 | Component | Baseline | With All Optimizations | Speedup |
 |-----------|----------|----------------------|---------|
-| **Qwen3-VL-72B Fine-tuning** | 24 hours | **14.4 hours** | **1.67×** (UnSloth+SOAP) |
+| **Qwen3-VL-72B Fine-tuning** | 24 hours | **Reduced** (UnSloth + AdEMAMix; GPU-dependent) | 🚀 |
 | **YOLO-Master Training** | 8 hours | **4 hours** | **2×** (Sophia-H) |
 | **DINOv3 Training** | 12 hours | **6 hours** | **2×** (already using Sophia-H) |
 
@@ -3552,7 +3551,7 @@ aqlm>=1.0.0                     # 2-bit extreme compression
 |--------|------------------------|----------------------|-------------|
 | **AIME (Reasoning)** | 15.6% | **50%** (4.5× with test-time scaling) | 🔥🔥🔥 |
 | **LoRA Parameters** | ~16M | **160K** (99% reduction with VeRA) | 🔥🔥🔥 |
-| **VLM Convergence** | Baseline | **+40% faster** (SOAP) | 🔥🔥 |
+| **VLM Convergence** | Baseline | **Faster & more stable** (AdEMAMix) | 🔥🔥 |
 | **Object Detection** | Baseline | **+3-5%** (CutMix/MixUp) | 🔥🔥 |
 
 ---
@@ -3565,17 +3564,16 @@ aqlm>=1.0.0                     # 2-bit extreme compression
 - [ ] DPO trainer created (`src/training/trainers/dpo_trainer.py`)
 - [ ] MCC callback created (`src/training/callbacks/mcc_callback.py`)
 - [ ] EMA callback created (`src/training/callbacks/ema_callback.py`)
-- [ ] Training requirements installed (`requirements/training.txt`)
+- [ ] Training requirements installed (`requirements/production.txt`)
 
 ### **Week 1.5: Latest 2025/2026 Techniques** 🚀 CRITICAL
 - [ ] DAPO trainer created (`src/training/rlvr/dapo_grpo_trainer.py`) 🔥
 - [ ] AdaLoRA config created (`src/training/lora/adalora_config.py`) 🔥
 - [ ] VeRA config created (`src/training/lora/vera_config.py`) 🔥
 - [ ] IA³ config created (`src/training/lora/ia3_config.py`)
-- [ ] SOAP optimizer created (`src/training/optimizers/soap.py`) 🔥
+- [ ] AdEMAMix optimizer wrapper created (`src/training/optimizers/ademamix.py`) 🔥
+- [ ] Muon+AdamW hybrid created (`src/training/optimizers/muon_adamw_hybrid.py`) 🔥
 - [ ] Schedule-Free AdamW created (`src/training/optimizers/schedule_free_adamw.py`)
-- [ ] Prodigy optimizer created (`src/training/optimizers/prodigy.py`)
-- [ ] Muon optimizer created (`src/training/optimizers/muon.py`)
 - [ ] Latest augmentation created (`src/data/augmentation/latest_aug_2025.py`)
 
 ### **Week 2: Model Implementations**
@@ -3622,7 +3620,7 @@ aqlm>=1.0.0                     # 2-bit extreme compression
 
 ### **Next Steps**:
 1. Create all 23 Python files in `stage1_ultimate/src/`
-2. Update `requirements/training.txt` with 6 new libraries
+2. Update `requirements/production.txt` with the updated optimizer stack
 3. Install all new libraries
 4. Start with Week 1.5 (Day 1-2): DAPO implementation (most critical!)
 5. Train all 8 models using documented scripts
