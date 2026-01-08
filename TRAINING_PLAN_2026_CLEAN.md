@@ -10,15 +10,16 @@
 2. [Cross-References](#cross-references)
 3. [Current State Analysis](#current-state-analysis)
 4. [What We're Adding](#what-were-adding)
-5. [Week 1: Core Training Infrastructure](#week-1-core-training-infrastructure)
-6. [Week 1.5: Latest 2025/2026 Techniques](#week-15-latest-20252026-techniques)
-7. [Week 2: New Model Implementations](#week-2-new-model-implementations)
-8. [Week 3: Advanced Training Techniques](#week-3-advanced-training-techniques)
-9. [Week 4: Active Learning & Deployment](#week-4-active-learning--deployment)
-10. [Complete File Mapping](#complete-file-mapping)
-11. [Implementation Timeline](#implementation-timeline)
-12. [Performance Targets](#performance-targets)
-13. [Final Checklist](#final-checklist)
+5. [Week 0: Close Stage1 Gaps](#week-0-close-stage1-gaps)
+6. [Week 1: Core Training Infrastructure](#week-1-core-training-infrastructure)
+7. [Week 1.5: Latest 2025/2026 Techniques](#week-15-latest-20252026-techniques)
+8. [Week 2: New Model Implementations](#week-2-new-model-implementations)
+9. [Week 3: Advanced Training Techniques](#week-3-advanced-training-techniques)
+10. [Week 4: Active Learning & Deployment](#week-4-active-learning--deployment)
+11. [Complete File Mapping](#complete-file-mapping)
+12. [Implementation Timeline](#implementation-timeline)
+13. [Performance Targets](#performance-targets)
+14. [Final Checklist](#final-checklist)
 
 ---
 
@@ -303,6 +304,34 @@ pydantic>=2.0.0                 # Config validation
 
 ---
 
+## Week 0: Close Stage1 Gaps
+
+**Do this before any training.**
+
+This plan is “best/latest” only if the repo can run end-to-end on an SSH/GPU box without missing modules and without silent data bias. Close these gaps first.
+
+### ✅ Critical gaps to close (Stage 1 readiness)
+1. **GPS-aware sampling (NATIX-specific)**:
+   - You already have `stage1_ultimate/src/data/samplers/gps_weighted_sampler.py`.
+   - **Action**: wire it into the dataloader/training config so GPS is actually used (prevents location bias).
+2. **Latest augmentations (accuracy boost)**:
+   - You already have `stage1_ultimate/src/data/augmentation/heavy_aug_kornia.py`.
+   - **Action**: create `stage1_ultimate/src/data/augmentation/latest_aug_2025.py` with **TrivialAugment + CutMix + MixUp** and make it selectable from config.
+3. **Callbacks folder is empty (must implement)**:
+   - **Action**: implement `stage1_ultimate/src/training/callbacks/mcc_callback.py` and `stage1_ultimate/src/training/callbacks/ema_callback.py`, then register them in your trainer loop.
+4. **Advanced PEFT config stubs (needed later; add now so you don’t block Week 1.5)**:
+   - **Action**: create `stage1_ultimate/src/training/lora/` and add `adalora_config.py`, `vera_config.py`, `ia3_config.py`.
+
+### Quick existence checks (local or SSH)
+```bash
+ls stage1_ultimate/src/data/samplers
+ls stage1_ultimate/src/data/augmentation
+ls stage1_ultimate/src/training/callbacks
+ls stage1_ultimate/src/training/lora
+```
+
+---
+
 ## 📅 WEEK 1: CORE TRAINING INFRASTRUCTURE (40 hours)
 
 ### **Training Improvements Overview**
@@ -335,6 +364,7 @@ pydantic>=2.0.0                 # Config validation
   4. **Overshoot Reward Shaping**: Soft punishment for truncated responses
 - **Library**: `verl>=0.1.0` (open-source DAPO implementation)
 - **Source**: "DAPO: An Open-Source LLM Reinforcement Learning System at Scale" (Jan 2026)
+- **Important**: DAPO is **optional** for pure Stage 1 binary classification (DINOv3-style). Use it when you’re training/aliging a **VLM policy** with prompts + reward (reasoning/tool use/QA), not as a replacement for supervised classifier training.
 
 #### **🔥 Breakthrough #2: Advanced PEFT (All in peft>=0.14.0!)** 🚀 CRITICAL
 - **AdaLoRA**: Adaptive rank allocation (+2-3% over LoRA)
@@ -1003,11 +1033,11 @@ if __name__ == "__main__":
 
 ---
 
-#### **File 10**: `stage1_ultimate/src/training/lora/doran_config.py` ⭐ NEW!
+#### Optional Helper: `stage1_ultimate/src/training/lora/doran_config.py` (DoRA + RMSNorm)
 
-**What It Does**: DoRAN (DoRA + RMS Norm) - Enhanced LoRA variant
-**Library**: `peft>=0.14.0` (DoRA built-in!) + Custom RMS Norm integration
-**Impact**: +1-2% accuracy over standard DoRA
+**What It Does**: DoRAN (DoRA + RMSNorm) helper.
+**Library**: `peft>=0.14.0` (DoRA is built-in) + optional custom RMSNorm wrapper.
+**When to use**: only if you want the extra RMSNorm wrapper; otherwise set `use_dora=True` in the standard PEFT LoRA config and skip this file.
 
 ```python
 """
@@ -2403,7 +2433,7 @@ if __name__ == "__main__":
 
 ### **Day 14: GPS-Aware Training (8 hours) ⭐ NEW!**
 
-#### **File 21**: `stage1_ultimate/src/training/active_learning/gps_aware_sampler.py`
+#### **File 22**: `stage1_ultimate/src/training/active_learning/gps_aware_sampler.py`
 
 **What It Does**: GPS-aware active learning with geographic clustering
 **Library**: `scikit-learn>=1.6.0`, `scipy>=1.15.0` (already installed!)
@@ -2656,7 +2686,7 @@ GPS-Aware Active Learning:
 
 ### **Day 15-16: VL2Lite Distillation (16 hours)**
 
-#### **File 21**: `stage1_ultimate/src/training/distillation/vl2lite_distiller.py`
+#### **File 23**: `stage1_ultimate/src/training/distillation/vl2lite_distiller.py`
 
 **What It Does**: Distill large VLM into smaller model
 **Impact**: +7% accuracy with 10× smaller model
@@ -2827,7 +2857,7 @@ def run_vl2lite_distillation(
 
 ### **Day 16-17: BayesKD Distillation (16 hours) ⭐ NEW!**
 
-#### **File 22**: `stage1_ultimate/src/training/distillation/bayeskd_distiller.py`
+#### **File 24**: `stage1_ultimate/src/training/distillation/bayeskd_distiller.py`
 
 **What It Does**: BayesKD (Bayesian Knowledge Distillation) - Multi-level distillation
 **Library**: Custom implementation (PyTorch)
@@ -3182,7 +3212,7 @@ Breakdown:
 
 ### **Day 17-18: Advanced Quantization (16 hours) ⭐ NEW!**
 
-#### **File 24**: `stage1_ultimate/src/training/quantization/advanced_quant_2026.py`
+#### **File 25**: `stage1_ultimate/src/training/quantization/advanced_quant_2026.py`
 
 **What It Does**: Advanced Quantization Stack (FP8, MXFP4, AQLM)
 **Libraries**: `nvidia-modelopt>=0.17.0`, `llm-compressor>=0.3.0`, `aqlm>=1.0.0`, `lmdeploy>=0.10.0`
@@ -3510,45 +3540,53 @@ aqlm>=1.0.0                     # 2-bit extreme compression
 
 ## 📊 CORE FILE MAPPING (minimum set - UPDATED!)
 
-**Note**: file numbers are historical; follow **file paths** as the source of truth.
+**Note**: **File paths** are the source of truth.
 
 ### **Training Infrastructure** (5 files)
-| # | File Path | Status |
-|---|-----------|--------|
-| **1** | `src/training/trainers/unsloth_trainer.py` | 🆕 NEW |
-| **2** | `src/training/trainers/lora_trainer.py` | 🆕 NEW |
-| **3** | `src/training/trainers/dpo_trainer.py` | 🆕 NEW |
-| **4** | `src/training/callbacks/mcc_callback.py` | 🆕 NEW |
-| **5** | `src/training/callbacks/ema_callback.py` | 🆕 NEW |
+| File Path | Status |
+|---|---|
+| `src/training/trainers/unsloth_trainer.py` | 🆕 NEW |
+| `src/training/trainers/lora_trainer.py` | 🆕 NEW |
+| `src/training/trainers/dpo_trainer.py` | 🆕 NEW |
+| `src/training/callbacks/mcc_callback.py` | 🆕 NEW |
+| `src/training/callbacks/ema_callback.py` | 🆕 NEW |
+
+### **Data & Sampling** (2 files) ✅ NATIX-critical
+| File Path | Status |
+|---|---|
+| `src/data/samplers/gps_weighted_sampler.py` | ✅ EXISTS (wire into training; prevents location bias) |
+| `src/data/augmentation/heavy_aug_kornia.py` | ✅ EXISTS (keep; complements the “latest” augs) |
 
 ### **Week 1.5: Latest 2025/2026 Techniques** (8 files) 🚀 UPDATED!
-| # | File Path | Priority |
-|---|-----------|----------|
-| **6** | `src/training/rlvr/dapo_grpo_trainer.py` | 🚀 CRITICAL |
-| **7** | `src/training/lora/adalora_config.py` | 🚀 CRITICAL |
-| **8** | `src/training/lora/vera_config.py` | 🚀 CRITICAL |
-| **9** | `src/training/lora/ia3_config.py` | HIGH |
-| **10** | `src/training/optimizers/ademamix.py` | 🚀 CRITICAL |
-| **11** | `src/training/optimizers/muon_adamw_hybrid.py` | 🚀 CRITICAL |
-| **12** | `src/training/optimizers/schedule_free_adamw.py` | HIGH |
-| **13** | `src/data/augmentation/latest_aug_2025.py` | HIGH |
+| File Path | Priority |
+|---|---|
+| `src/training/rlvr/dapo_grpo_trainer.py` | 🚀 CRITICAL |
+| `src/training/lora/adalora_config.py` | 🚀 CRITICAL |
+| `src/training/lora/vera_config.py` | 🚀 CRITICAL |
+| `src/training/lora/ia3_config.py` | HIGH |
+| `src/training/optimizers/ademamix.py` | 🚀 CRITICAL |
+| `src/training/optimizers/muon_adamw_hybrid.py` | 🚀 CRITICAL |
+| `src/training/optimizers/schedule_free_adamw.py` | HIGH |
+| `src/data/augmentation/latest_aug_2025.py` | HIGH |
 
 ### **Week 2: New Model Implementations** (7 files)
-| # | File Path | Model |
-|---|-----------|--------|
-| **14** | `src/models_2026/detection/yolo_master_trainer.py` | YOLO-Master-N |
-| **15** | `src/models_2026/detection/rf_detr_trainer.py` | RF-DETR-large |
-| **16** | `src/models_2026/detection/adfnet_trainer.py` | ADFNet night specialist |
-| **17** | `src/models_2026/vlm/qwen3_vl_72b_trainer.py` | Qwen3-VL-72B QLoRA |
-| **18** | `src/models_2026/vlm/llama4_maverick_trainer.py` | Llama 4 Maverick LoRA |
-| **19** | `src/models_2026/vlm/qwen3_vl_4b_trainer.py` | Qwen3-VL-4B LoRA |
-| **20** | `src/models_2026/depth/depth_anything_v3_trainer.py` | Depth Anything 3 |
+| File Path | Model |
+|---|---|
+| `src/models_2026/detection/yolo_master_trainer.py` | YOLO-Master-N |
+| `src/models_2026/detection/rf_detr_trainer.py` | RF-DETR-large |
+| `src/models_2026/detection/adfnet_trainer.py` | ADFNet night specialist |
+| `src/models_2026/vlm/qwen3_vl_72b_trainer.py` | Qwen3-VL-72B QLoRA |
+| `src/models_2026/vlm/llama4_maverick_trainer.py` | Llama 4 Maverick LoRA |
+| `src/models_2026/vlm/qwen3_vl_4b_trainer.py` | Qwen3-VL-4B LoRA |
+| `src/models_2026/depth/depth_anything_v3_trainer.py` | Depth Anything 3 |
 
-### **Week 3: Advanced Techniques** (2 files) 🆕 NEW!
-| # | File Path | Status |
-|---|-----------|--------|
-| **21** | `src/training/active_learning/sampler.py` | 🆕 NEW |
-| **22** | `src/training/distillation/vl2lite_distiller.py` | 🆕 NEW |
+### **Week 3: Advanced Techniques** (4 files) 🆕 NEW!
+| File Path | Status |
+|---|---|
+| `src/training/active_learning/sampler.py` | 🆕 NEW |
+| `src/training/active_learning/gps_aware_sampler.py` | 🆕 NEW |
+| `src/training/distillation/vl2lite_distiller.py` | 🆕 NEW |
+| `src/training/distillation/bayeskd_distiller.py` | 🆕 NEW (optional) |
 
 **Note**: Additional optional/experimental modules appear later in this document; keep the list above as the minimum “core” set.
 
@@ -3556,9 +3594,15 @@ aqlm>=1.0.0                     # 2-bit extreme compression
 
 ## 📅 IMPLEMENTATION TIMELINE
 
+### **Week 0: Close Stage 1 Gaps (16 hours) ✅ DO THIS FIRST**
+- **Day 0.1**: Wire GPS-aware sampling (use `src/data/samplers/gps_weighted_sampler.py`) (4h)
+- **Day 0.2**: Implement “latest” augmentations (TrivialAugment + CutMix + MixUp) in `src/data/augmentation/latest_aug_2025.py` (4h)
+- **Day 0.3**: Implement + register MCC + EMA callbacks (`src/training/callbacks/`) (4h)
+- **Day 0.4**: Create PEFT config stubs (`src/training/lora/adalora_config.py`, `vera_config.py`, `ia3_config.py`) (4h)
+
 ### **Week 1: Core Infrastructure (40 hours)**
 - **Day 1-2**: UnSloth, LoRA, DPO trainers (16h)
-- **Day 3-4**: MCC, EMA callbacks (16h)
+- **Day 3-4**: Trainer integration (dataset modes, samplers, augmentations, logging) (16h)
 - **Day 5**: Testing & integration (8h)
 
 ### **Week 1.5: Latest 2025/2026 Techniques (40 hours)**
@@ -3574,15 +3618,15 @@ aqlm>=1.0.0                     # 2-bit extreme compression
 - **Day 14-15**: Qwen3-VL-4B, remaining VLMs (16h)
 
 ### **Week 3: Advanced Techniques (40 hours)**
-- **Day 16-17**: Active learning sampler (16h)
+- **Day 16-17**: Active learning sampler + GPS-aware sampler (16h)
 - **Day 18-19**: VL2Lite distillation (16h)
-- **Day 20**: Testing & validation (8h)
+- **Day 20**: Testing & validation (8h) (optional: schedule extra 16h if you choose BayesKD)
 
 ### **Week 4: Training & Deployment (40 hours)**
 - **Day 21-24**: Train all 8 models (32h)
 - **Day 25-28**: Deploy to production + monitoring (32h)
 
-**Total**: 160 hours (4 weeks)
+**Total**: ~160 hours (4 weeks) if Week 0 items are already partially done; otherwise budget **+16h** for Week 0 gap-closure.
 
 ---
 
@@ -3646,10 +3690,11 @@ aqlm>=1.0.0                     # 2-bit extreme compression
 - [ ] DPO trainer created (`src/training/trainers/dpo_trainer.py`)
 - [ ] MCC callback created (`src/training/callbacks/mcc_callback.py`)
 - [ ] EMA callback created (`src/training/callbacks/ema_callback.py`)
+- [ ] GPS-weighted sampler is wired into training (`src/data/samplers/gps_weighted_sampler.py`) 🔥 NATIX-critical
 - [ ] Training requirements installed (`requirements/production.txt`)
 
 ### **Week 1.5: Latest 2025/2026 Techniques** 🚀 CRITICAL
-- [ ] DAPO trainer created (`src/training/rlvr/dapo_grpo_trainer.py`) 🔥
+- [ ] DAPO trainer created (`src/training/rlvr/dapo_grpo_trainer.py`) 🔥 (optional unless doing VLM RL)
 - [ ] AdaLoRA config created (`src/training/lora/adalora_config.py`) 🔥
 - [ ] VeRA config created (`src/training/lora/vera_config.py`) 🔥
 - [ ] IA³ config created (`src/training/lora/ia3_config.py`)
@@ -3669,7 +3714,9 @@ aqlm>=1.0.0                     # 2-bit extreme compression
 
 ### **Advanced Techniques**
 - [ ] Active learning sampler created (`src/training/active_learning/sampler.py`)
+- [ ] GPS-aware sampler created (`src/training/active_learning/gps_aware_sampler.py`)
 - [ ] VL2Lite distiller created (`src/training/distillation/vl2lite_distiller.py`)
+- [ ] BayesKD distiller created (`src/training/distillation/bayeskd_distiller.py`) (optional)
 
 ### **Training Scripts**
 - [ ] Master training script created (`scripts/training/train_all_models.sh`)
@@ -3688,24 +3735,22 @@ aqlm>=1.0.0                     # 2-bit extreme compression
 ## **Summary of All Additions**
 
 ### **What Was Added**:
-1. ✅ **Week 1.5** section with 9 critical 2025/2026 techniques
-2. ✅ **23 new files** documented with complete Python code (no duplicates!)
-3. ✅ **6 new libraries** in requirements.txt
-4. ✅ **Complete project structure** for all 23 files
-5. ✅ **Updated performance targets** (AIME 50%, VLM 2.8× faster, etc.)
+1. ✅ **Week 0** “close gaps” step so Stage 1 can run end-to-end (GPS sampling, callbacks, latest augs, PEFT stubs)
+2. ✅ **Week 1.5** section with the latest 2025/2026 techniques (AdEMAMix, Muon, PEFT 0.14+; DAPO optional)
+3. ✅ **Core file mapping** updated to reflect what’s required vs optional (follow file paths)
+4. ✅ **Updated requirements guidance** (stable `transformers>=4.57.3`, `torch.optim.Muon`, no GitHub Muon)
+5. ✅ **Updated performance targets** with clear “GPU-dependent” language where appropriate
 
 ### **Total Content**:
-- **23 files** (clean, no duplicates!)
-- **~7,650 lines** of production code
-- **~2,800 lines** of documentation
-- **40 hours** of implementation time (Week 1.5)
+- **Core set**: see “CORE FILE MAPPING” (plus optional modules like BayesKD / advanced quantization)
+- **Time**: depends on what already exists; Week 0 is the “don’t get blocked” minimum
 
 ### **Next Steps**:
-1. Create all 23 Python files in `stage1_ultimate/src/`
-2. Update `requirements/production.txt` with the updated optimizer stack
-3. Install all new libraries
-4. Start with Week 1.5 (Day 1-2): DAPO implementation (most critical!)
-5. Train all 8 models using documented scripts
+1. Do **Week 0** first (close GPS/aug/callback/PEFT gaps)
+2. Update `requirements/production.txt` and install on the SSH/GPU box
+3. Run **Week 1** core trainer integration
+4. Use **Week 1.5** for “latest” techniques as needed (DAPO only if you’re doing VLM RL)
+5. Train the selected models using the documented scripts
 
 **This is THE ABSOLUTE LATEST 2025/2026 training stack!** 🚀🔥🔥🔥
 
