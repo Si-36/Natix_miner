@@ -128,6 +128,44 @@ stage1_ultimate/src/
 
 ---
 
+## 📊 DATASET SPECIFICATIONS (Fill Before Training)
+
+**Stop here and fill this in before implementing trainers.** The optimizer/AL/calibration choices depend on these numbers.
+
+```yaml
+dataset:
+  name: NATIX roadwork
+  root: ???                 # path on SSH box
+  total_images: ???
+  labeled_images: ???
+  unlabeled_pool: ???       # for active learning (optional)
+
+splits:
+  train: 0.70
+  val_select: 0.15          # early stopping/model selection only
+  val_calib: 0.10           # threshold/calibration only
+  val_test: 0.05            # final report only
+
+labels:
+  task: binary_roadwork
+  positive_ratio: ???       # % roadwork=True
+  imbalance_strategy: ???   # e.g. "weighted_loss" | "oversample" | "focal" | "none"
+
+gps:
+  format: ???               # "exif" | "csv" | "json"
+  csv_path: ???             # if format=csv
+  json_path: ???            # if format=json
+  fields:
+    image_id: filename
+    lat: lat
+    lon: lon
+  notes: ???                # coverage / time range / accuracy
+```
+
+**GPS-aware sampling (if enabled)** assumes you can map each image → `(lat, lon)` reliably.
+
+---
+
 # 🔥 WHAT WE'RE ADDING
 
 ## 📊 Training Improvements Overview
@@ -143,8 +181,8 @@ stage1_ultimate/src/
 | **MCC Callback** | Custom | Track roadwork MCC | ⭐ NEW |
 | **EMA Callback** | Custom | Model stability | ⭐ NEW |
 | **DAPO (GRPO++)** | verl>=0.1.0 | +67% AIME (30%→50%) | 🔥 CRITICAL NEW |
-| **AdEMAMix Optimizer** | transformers>=4.44.0 | Stable VLM fine-tune | 🔥 CRITICAL NEW |
-| **Muon+AdamW Hybrid** | Muon (GitHub) + torch | Stable finetune | 🔥 CRITICAL NEW |
+| **AdEMAMix Optimizer** | transformers>=4.57.0 | Stable VLM fine-tune | 🔥 CRITICAL NEW |
+| **Muon+AdamW Hybrid** | torch>=2.8.0 (`torch.optim.Muon`) | Stable fine-tune | 🔥 CRITICAL NEW |
 | **MuSGD (YOLO26)** | ultralytics>=8.3.48 | Detector fine-tune | 🔥 HIGH NEW |
 | **FlashAttention-3** | flash-attn>=3.0.0 | 1.5-2× faster, FP8 | 🔥 CRITICAL NEW |
 | **AdaLoRA** | peft>=0.14.0 | +2-3% accuracy | 🔥 CRITICAL NEW |
@@ -166,12 +204,15 @@ stage1_ultimate/src/
 # ===================================
 # ⭐ CRITICAL UPGRADES - UPDATE THESE!
 # ===================================
-flash-attn>=3.0.0               # ⭐ FlashAttention-3 (1.5-2× faster, FP8!)
-transformers>=4.44.0            # ⭐ AdEMAMix built-in + modern VLM support
-torch>=2.8.0+cu121              # ⭐ PyTorch 2.8+ required
+--index-url https://download.pytorch.org/whl/cu121
+torch==2.8.0+cu121              # ⭐ PyTorch 2.8 (vLLM 0.13 + Muon optimizer)
+torchvision==0.23.0+cu121
+torchaudio==2.8.0+cu121
+transformers>=4.57.0            # ⭐ Latest stable 4.x line (Qwen3-VL + Llama 4 + AdEMAMix)
+flash-attn>=3.0.0               # ⭐ FlashAttention-3 (install with --no-build-isolation)
 
 # ===================================
-# ⭐ FAST TRAINING (42× SPEEDUP!)
+# ⭐ FAST TRAINING (VLM)
 # ===================================
 unsloth>=2025.12.23             # 30× faster training for LLMs/VLMs
 flash-attn>=3.0.0               # Required by UnSloth (UPGRADED!)
@@ -189,9 +230,8 @@ trl>=0.13.0                     # DPO, PPO, GRPO alignment training
 schedulefree>=1.0.0             # Schedule-Free AdamW (no LR schedule!) ⭐ NEW!
 accelerate>=1.2.0               # Multi-GPU training
 lion-pytorch                    # Optional (memory-friendly), keep optional
-
-# Muon optimizer (GitHub install; used by Muon+AdamW hybrid)
-# pip install git+https://github.com/KellerJordan/Muon.git
+ 
+# Muon is built into PyTorch 2.8+: use `torch.optim.Muon` (no GitHub dependency).
 
 # ===================================
 # ⭐ RLVR TRAINING (DAPO/GRPO++) - NEW!
@@ -241,9 +281,9 @@ pydantic>=2.0.0                 # Config validation
 ```
 
 **Notes**:
-- AdEMAMix is included in `transformers>=4.44.0` (no extra package).
+- AdEMAMix is included in `transformers>=4.57.0` (no extra package).
 - MuSGD is built into `ultralytics>=8.3.48` for YOLO-family training.
-- Muon is installed from GitHub (see comment above).
+- Muon is included in `torch.optim` (PyTorch 2.8+).
 
 ---
 
@@ -299,6 +339,20 @@ pydantic>=2.0.0                 # Config validation
 - **MuSGD (Ultralytics / YOLO26)**: strong detector fine-tuning defaults
 - **Schedule-Free AdamW**: optional fallback when you want “no LR schedule” simplicity
 
+---
+
+## 🧭 OPTIMIZER DECISION TREE (Do Not Skip)
+
+| What you are training | Use | Why |
+|---|---|---|
+| **VLM fine-tune** (Qwen3-VL / Llama 4 / InternVL) | **AdEMAMix** (`transformers>=4.57.0`) | Stable VLM fine-tuning |
+| **Ultralytics detectors** (YOLO-Master / YOLO11 / YOLO26) | **MuSGD** (Ultralytics built-in) | Optimized for detector training |
+| **Existing Stage1 backbone** | **Keep existing optimizer** (e.g. Sophia-H where already implemented) | Avoid unnecessary churn |
+| **HF-style custom loops** (vision backbones, RF-DETR outside Ultralytics) | **Muon+AdamW hybrid** (`torch.optim.Muon`) | Stability (AdamW) + speed (Muon) |
+| **“No schedule” quick runs** | **Schedule-Free AdamW** | Fewer knobs; good fallback |
+
+**Rule of thumb**: if you can train it inside Ultralytics, start with MuSGD; if it’s a VLM, start with AdEMAMix; otherwise use Muon+AdamW hybrid.
+
 #### **🔥 Breakthrough #5: Data Augmentation** 🚀 HIGH
 - **TrivialAugment**: Zero hyperparameters, beats RandAugment!
 - **CutMix**: +3.5% object detection accuracy
@@ -334,6 +388,31 @@ import logging
 from verl import GRPOConfig, GRPOTrainer
 
 logger = logging.getLogger(__name__)
+
+
+# ===================================
+# ROADWORK-SPECIFIC REWARD FUNCTION
+# ===================================
+
+class RoadworkRewardFunction:
+    """
+    Minimal reward function for roadwork detection RL.
+    Reward is based on matching the binary label, with a small bonus for concise rationale.
+    """
+
+    POSITIVE = ("roadwork", "construction", "cones", "barrier", "workers", "detour", "equipment")
+
+    def compute_reward(self, completion: str, ground_truth: bool) -> float:
+        text = completion.lower()
+        predicts_yes = ("yes" in text[:80]) or any(k in text for k in self.POSITIVE)
+        prediction = bool(predicts_yes)
+
+        if prediction != ground_truth:
+            return 0.0
+
+        # Bonus for providing some evidence (kept capped)
+        detail_bonus = min(len(text.split()) / 80.0, 0.2)
+        return min(1.0, 0.8 + detail_bonus)
 
 
 class DAPOTrainer:
@@ -590,6 +669,18 @@ class DAPOTrainer:
 - ✅ 50% sample efficiency improvement
 
 ---
+
+## 🤔 DPO vs DAPO (Do Not Mix Them Up)
+
+| Method | What it optimizes | Data you need | When to use |
+|---|---|---|---|
+| **DAPO (GRPO++)** | **Task success/accuracy** via reward | prompts + reward function (labels/verifier) | when you want the model to be *more correct* |
+| **DPO** | **Preference alignment** (style/quality) | preference pairs (chosen vs rejected) | when you want the model to answer *better* (clarity/detail) |
+
+**Recommended order for this project**:
+1. Train baseline/SFT first (detectors + VLM SFT).
+2. Use **DAPO only if** you have a reliable reward signal for the task.
+3. Add **DPO last** (optional) for answer quality once accuracy is solid.
 
 ### **Day 3-4: Advanced PEFT Configurations (12 hours) ⭐ **CRITICAL!**
 
@@ -1077,7 +1168,7 @@ DoRA + RMS Norm:   92.0% accuracy (+1.5%)
 
 #### **File 10**: `stage1_ultimate/src/training/optimizers/ademamix.py` ⭐ CRITICAL!
 
-**What It Does**: AdEMAMix wrapper (available in `transformers>=4.44.0`)
+**What It Does**: AdEMAMix wrapper (available in `transformers>=4.57.0`)
 **Impact**: stable, efficient VLM fine-tuning
 
 ```python
@@ -1117,7 +1208,7 @@ class AdEMAMixOptimizer:
 #### **File 11**: `stage1_ultimate/src/training/optimizers/muon_adamw_hybrid.py` ⭐ CRITICAL!
 
 **What It Does**: Muon+AdamW hybrid helper (stable fine-tuning; use Muon at lower LR)
-**Requires**: `pip install git+https://github.com/KellerJordan/Muon.git`
+**Requires**: PyTorch 2.8+ (`torch.optim.Muon` is built-in)
 
 ```python
 """
@@ -1134,10 +1225,17 @@ class MuonAdamWHybrid:
     @staticmethod
     def create(model, lr=1e-3, lr_muon=1e-4, weight_decay=0.01, betas=(0.9, 0.999)):
         import torch
-        from muon import Muon
 
         adamw = torch.optim.AdamW(model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
-        muon = Muon(model.parameters(), lr=lr_muon)
+        muon_params = [p for p in model.parameters() if p.dim() >= 2]  # 2D+ weights only
+        muon = torch.optim.Muon(
+            muon_params,
+            lr=lr_muon,
+            weight_decay=weight_decay,
+            momentum=0.95,
+            nesterov=True,
+            adjust_lr_fn="match_rms_adamw",
+        )
 
         logger.info(f"✅ Hybrid created (adamw_lr={lr}, muon_lr={lr_muon})")
         return {"adamw": adamw, "muon": muon}
@@ -1324,79 +1422,9 @@ if __name__ == "__main__":
 
 **Why**: Prefer **Muon+AdamW hybrid** for stability; and for Ultralytics detectors use **MuSGD** (built-in).
 
-**What It Does**: Muon (+35% detection model convergence)
-**Library**: Muon (GitHub install; not included in pip requirements)
-**Impact**: +35% detection convergence
-
-```python
-"""
-Muon Optimizer - GPU-Accelerated Optimizer for Vision Models
-+35% faster convergence on detection models!
-"""
-
-# Install (GitHub)
-# pip install git+https://github.com/KellerJordan/Muon.git
-
-from muon import Muon
-import torch
-import logging
-
-logger = logging.getLogger(__name__)
-
-
-def create_muon_optimizer(
-    model,
-    lr=1e-3,
-    betas=(0.9, 0.999),
-    weight_decay=0.01
-):
-    """
-    Create Muon optimizer for detection models
-    
-    Impact: +35% faster convergence on YOLO, RF-DETR, etc.
-    
-    Args:
-        model: PyTorch model (detection model)
-        lr: Learning rate (1e-3 recommended)
-        betas: Adam betas
-        weight_decay: Weight decay
-        
-    Returns:
-        Muon optimizer
-    """
-    optimizer = Muon(
-        model.parameters(),
-        lr=lr,
-        betas=betas,
-        weight_decay=weight_decay,
-        Nesterov=True
-    )
-    
-    logger.info("✅ Muon optimizer created")
-    logger.info("   Expected: +35% faster detection convergence!")
-    
-    return optimizer
-
-
-# ===================================
-# USAGE EXAMPLE
-# ===================================
-
-if __name__ == "__main__":
-    from ultralytics import YOLO
-    import torch
-    
-    model = YOLO("yolo-master-n.pt")
-    
-    # Create Muon optimizer for YOLO-Master
-    optimizer = create_muon_optimizer(model.model)
-    
-    # Train with +35% faster convergence!
-    pass
-```
-
-**Expected Impact**:
-- ✅ **+35% faster detection convergence**
+**Note**:
+- Muon is available as `torch.optim.Muon` in PyTorch 2.8+.
+- For this plan: use **Muon inside the hybrid** (File 11) for HF-style loops, and use **MuSGD** for Ultralytics detectors.
 
 ---
 
@@ -1407,7 +1435,7 @@ if __name__ == "__main__":
 **Why**: Prefer **Schedule-Free AdamW** (no schedule), or keep existing schedulers already implemented in `stage1_ultimate/src/training/schedulers/`.
 
 **What It Does**: WSD (Warmup-Stable-Decay) Scheduler - Modern 3-phase LR schedule
-**Library**: `transformers>=4.44.0` (built-in!) + Custom implementation
+**Library**: `transformers>=4.57.0` (built-in!) + Custom implementation
 **Impact**: +10-15% better convergence, stable training plateau
 
 ```python
@@ -3553,6 +3581,22 @@ aqlm>=1.0.0                     # 2-bit extreme compression
 | **LoRA Parameters** | ~16M | **160K** (99% reduction with VeRA) | 🔥🔥🔥 |
 | **VLM Convergence** | Baseline | **Faster & more stable** (AdEMAMix) | 🔥🔥 |
 | **Object Detection** | Baseline | **+3-5%** (CutMix/MixUp) | 🔥🔥 |
+
+---
+
+## 💻 HARDWARE REQUIREMENTS (Training)
+
+| Component | Minimum | Recommended | Notes |
+|---|---:|---:|---|
+| GPU | 1× H100 80GB | 2× H100 80GB | 72B VLM fine-tune + parallel jobs |
+| CPU | 32 cores | 64 cores | dataloading + preprocessing |
+| RAM | 256 GB | 512 GB | large batches + caching |
+| Storage | 2 TB NVMe | 5 TB NVMe | checkpoints + datasets + caches |
+| Network | 10 Gbps | 25 Gbps | faster model/dataset sync |
+
+**Per-model VRAM (rough)**:
+- 72B VLM 4-bit adapters: ~40GB+
+- Detectors (YOLO/RF-DETR): usually <24GB
 
 ---
 

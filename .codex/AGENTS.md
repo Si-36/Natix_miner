@@ -83,10 +83,9 @@ MASTER IMPLEMENTATION PLAN: NATIX Subnet 72 Training + Inference System
   # Copy the "GPU/SSH Production" section from TRAINING_PLAN_2026_CLEAN.md
   # Key points in the UPDATED stack:
   # - NO SOAP / prodigyopt / muon-optimizer
-  # - AdEMAMix is built into transformers>=4.44.0
+  # - AdEMAMix is built into transformers>=4.57.0
   # - MuSGD is built into ultralytics>=8.3.48
-  # - Muon is installed from GitHub for Muon+AdamW hybrid:
-  #   pip install git+https://github.com/KellerJordan/Muon.git
+  # - Muon is built into PyTorch 2.8+: use `torch.optim.Muon` (no GitHub dependency)
   EOF
 
   VERIFICATION CHECKPOINT:
@@ -736,10 +735,10 @@ MASTER IMPLEMENTATION PLAN: NATIX Subnet 72 Training + Inference System
   # CORE INFERENCE (CRITICAL!)
   # ===================================
   vllm==0.13.0                    # V1 engine (Dec 18, 2025)
-  transformers>=4.50.0            # Qwen3-VL + DeepSeek-R1 support
+  transformers>=4.57.0            # Latest stable 4.x line (Qwen3-VL + Llama 4 support)
   torch==2.8.0+cu121              # BREAKING: vLLM 0.13 requires PyTorch 2.8
   torchvision==0.23.0+cu121
-  flash-attn>=2.8.0               # CRITICAL! PyTorch 2.8.0 ABI compatibility
+  flash-attn>=3.0.0               # FlashAttention-3 (install w/ --no-build-isolation; match torch ABI)
   flashinfer==0.3.0               # Required by vLLM 0.13
   accelerate>=1.2.0
 
@@ -803,7 +802,7 @@ MASTER IMPLEMENTATION PLAN: NATIX Subnet 72 Training + Inference System
   pip install torch==2.8.0+cu121 torchvision==0.23.0+cu121 -f https://download.pytorch.org/whl/torch_stable.html
 
   # Install flash-attn (MUST match PyTorch 2.8 ABI!)
-  pip install flash-attn>=2.8.0 --no-build-isolation
+  pip install flash-attn>=3.0.0 --no-build-isolation
 
   # Install vLLM 0.13 V1
   pip install vllm==0.13.0
